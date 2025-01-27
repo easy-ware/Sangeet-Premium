@@ -5,7 +5,7 @@ A one stop solution for music listening with stunning User Interface and smart m
 # Sangeet Premium 🎵
 
 <p align="center">
-  <img src="promo/logo.png" alt="Sangeet Premium Logo" width="200"/>
+  <img src="promo/logo.png" alt="Sangeet Premium Logo" width="600" height = "600"/>
 </p>
 
 A modern, open-source music player with a stunning user interface, smart recommendations, and high-quality audio streaming - completely free forever.
