@@ -23,7 +23,7 @@ Sangeet Premium solves these issues by providing:
 ## 🚀 Quick Start Guide
 
 ### 1. Setup Environment
-First, create a `.env` file in the root directory with the following configuration:
+First, create a `/config/.env` file in the root directory with the following configuration:
 
 ```env
 # Flask Configuration
@@ -53,8 +53,6 @@ port=7800
 git clone https://github.com/easy-ware/Sangeet-Premium.git
 cd Sangeet-Premium
 
-# Install dependencies (requirements.txt should be present)
-pip install -r requirements.txt
 
 # Run the application
 python run_server.py
