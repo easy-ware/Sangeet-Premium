@@ -10,7 +10,7 @@ A one stop solution for music listening with stunning User Interface and smart m
 
 A modern, open-source music player with a stunning user interface, smart recommendations, and high-quality audio streaming - completely free forever.
 
-![Player Screenshot](assets/player_screenshot.png)
+
 
 ## 🌟 Why Sangeet Premium?
 
