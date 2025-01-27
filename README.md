@@ -59,11 +59,7 @@ python run_server.py
 python3 run_server.py
 ```
 
-## 📸 Screenshots
 
-<p align="center">
-  <img src="promo/home_screen.png" alt="Home Screen" width="600"/>
-</p>
 
 ## 🛠️ Tech Stack
 
@@ -88,7 +84,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📧 Contact
 
-- GitHub: [@yourusername](https://github.com/easy-ware)
+- GitHub: [Easy Ware](https://github.com/easy-ware)
 
 ---
 
