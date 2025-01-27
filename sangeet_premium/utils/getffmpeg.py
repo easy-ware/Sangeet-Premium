@@ -5,91 +5,71 @@ import requests
 import logging
 import subprocess
 from pathlib import Path
-from colorama import init, Fore, Style, Back
+from colorama import init, Fore, Style
 from tqdm import tqdm
 import time
-import shutil
-import zipfile
-import tarfile
-import struct
-import json
-from datetime import datetime
 
 # Initialize colorama
 init(autoreset=True)
 
-# GitHub API endpoints and repositories
-GITHUB_API = {
-    'Windows': {
-        'repo': 'BtbN/FFmpeg-Builds',
-        'api_url': 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
+# FFmpeg Windows components URLs
+FFMPEG_URLS = {
+    'ffmpeg.exe': 'https://github.com/easy-ware/Sangeet-Premium/releases/download/components/ffmpeg.exe',
+    'ffprobe.exe': 'https://github.com/easy-ware/Sangeet-Premium/releases/download/components/ffprobe.exe',
+    'ffplay.exe': 'https://github.com/easy-ware/Sangeet-Premium/releases/download/components/ffplay.exe'
+}
+
+# Package manager commands for Unix-like systems
+PACKAGE_MANAGERS = {
+    'apt': {
+        'check': 'dpkg -l ffmpeg',
+        'install': 'sudo apt update && sudo apt install -y ffmpeg'
     },
-    'Linux': {
-        'repo': 'FFmpeg/FFmpeg',
-        'api_url': 'https://api.github.com/repos/FFmpeg/FFmpeg/releases/latest'
+    'dnf': {
+        'check': 'dnf list installed ffmpeg',
+        'install': 'sudo dnf install -y ffmpeg'
     },
-    'Darwin': {
-        'repo': 'FFmpeg/FFmpeg',
-        'api_url': 'https://api.github.com/repos/FFmpeg/FFmpeg/releases/latest'
+    'yum': {
+        'check': 'yum list installed ffmpeg',
+        'install': 'sudo yum install -y ffmpeg'
+    },
+    'pacman': {
+        'check': 'pacman -Qi ffmpeg',
+        'install': 'sudo pacman -S --noconfirm ffmpeg'
+    },
+    'brew': {
+        'check': 'brew list ffmpeg',
+        'install': 'brew install ffmpeg'
     }
 }
 
-# Required files for each platform
-REQUIRED_FILES = {
-    'Windows': ['ffmpeg.exe', 'ffprobe.exe', 'ffplay.exe'],
-    'Linux': ['ffmpeg', 'ffprobe', 'ffplay'],
-    'Darwin': ['ffmpeg', 'ffprobe', 'ffplay']
-}
+# Directory setup for Windows
+FFMPEG_DIR = os.path.join(os.getcwd(), 'ffmpeg', 'bin')
 
-class ColoredLogger:
-    def __init__(self):
-        self.logger = logging.getLogger('FFmpegDownloader')
-        self.logger.setLevel(logging.INFO)
-        self.logger.handlers = []
+def setup_logger():
+    logger = logging.getLogger('FFmpegDownloader')
+    logger.setLevel(logging.INFO)
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    class ColoredFormatter(logging.Formatter):
+        format_str = '%(asctime)s - %(levelname)s - %(message)s'
         
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        
-        class ColoredFormatter(logging.Formatter):
-            formats = {
-                logging.DEBUG: Fore.CYAN + '%(asctime)s - %(message)s' + Style.RESET_ALL,
-                logging.INFO: Fore.GREEN + '%(asctime)s - %(message)s' + Style.RESET_ALL,
-                logging.WARNING: Fore.YELLOW + '%(asctime)s - WARNING - %(message)s' + Style.RESET_ALL,
-                logging.ERROR: Fore.RED + '%(asctime)s - ERROR - %(message)s' + Style.RESET_ALL,
-                'STATUS': Fore.BLUE + Back.WHITE + '%(asctime)s - STATUS - %(message)s' + Style.RESET_ALL,
-                'SUCCESS': Fore.BLACK + Back.GREEN + '%(asctime)s - SUCCESS - %(message)s' + Style.RESET_ALL
-            }
+        FORMATS = {
+            logging.INFO: Fore.GREEN + format_str + Style.RESET_ALL,
+            logging.WARNING: Fore.YELLOW + format_str + Style.RESET_ALL,
+            logging.ERROR: Fore.RED + format_str + Style.RESET_ALL
+        }
 
-            def format(self, record):
-                format_orig = self.formats.get(record.levelno, self.formats['STATUS'])
-                formatter = logging.Formatter(format_orig, datefmt='%H:%M:%S')
-                return formatter.format(record)
+        def format(self, record):
+            log_fmt = self.FORMATS.get(record.levelno, self.format_str)
+            formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
+            return formatter.format(record)
 
-        console_handler.setFormatter(ColoredFormatter())
-        self.logger.addHandler(console_handler)
-
-    def status(self, msg): self.logger._log(100, msg, ())
-    def success(self, msg): self.logger._log(101, msg, ())
-    def info(self, msg): self.logger.info(msg)
-    def error(self, msg): self.logger.error(msg)
-    def warning(self, msg): self.logger.warning(msg)
-
-def get_system_info():
-    system = platform.system()
-    machine = platform.machine().lower()
-    
-    arch_map = {
-        'x86_64': 'x64',
-        'amd64': 'x64',
-        'i386': 'x86',
-        'i686': 'x86',
-        'aarch64': 'arm64',
-        'arm64': 'arm64'
-    }
-    
-    arch = arch_map.get(machine, machine)
-    
-    return system, arch
+    console_handler.setFormatter(ColoredFormatter())
+    logger.addHandler(console_handler)
+    return logger
 
 def format_size(size):
     for unit in ['B', 'KB', 'MB', 'GB']:
@@ -97,202 +77,130 @@ def format_size(size):
             return f"{size:.2f} {unit}"
         size /= 1024.0
 
-def get_github_release(system, arch, logger):
-    headers = {}
-    if 'GITHUB_TOKEN' in os.environ:
-        headers['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
+def detect_package_manager():
+    for pm, commands in PACKAGE_MANAGERS.items():
+        try:
+            result = subprocess.run(['which', pm], capture_output=True, text=True)
+            if result.returncode == 0:
+                return pm
+        except:
+            continue
+    return None
+
+def install_unix_ffmpeg(package_manager, logger):
+    try:
+        # Check if FFmpeg is already installed
+        check_cmd = PACKAGE_MANAGERS[package_manager]['check']
+        check_result = subprocess.run(check_cmd, shell=True, capture_output=True)
+        
+        if check_result.returncode == 0:
+            logger.info(f"{Fore.GREEN}FFmpeg is already installed via {package_manager}")
+            return True
+        
+        # Install FFmpeg
+        logger.info(f"Installing FFmpeg using {package_manager}...")
+        install_cmd = PACKAGE_MANAGERS[package_manager]['install']
+        process = subprocess.run(install_cmd, shell=True, check=True)
+        
+        if process.returncode == 0:
+            logger.info(f"{Fore.GREEN}Successfully installed FFmpeg using {package_manager}")
+            return True
+        return False
+    
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error installing FFmpeg: {str(e)}")
+        return False
+
+def download_windows_component(filename, url, logger):
+    save_path = os.path.join(FFMPEG_DIR, filename)
+    
+    # Check if file already exists
+    if os.path.exists(save_path):
+        logger.info(f"{Fore.CYAN}{filename}{Style.RESET_ALL} already exists")
+        return True
     
     try:
-        api_url = GITHUB_API[system]['api_url']
-        response = requests.get(api_url, headers=headers)
-        response.raise_for_status()
-        release_data = response.json()
-        
-        # Get assets based on system and architecture
-        if system == 'Windows':
-            asset_pattern = f"ffmpeg-master-latest-win{arch}-gpl.zip"
-        elif system == 'Linux':
-            asset_pattern = f"ffmpeg-release-{arch}-static.tar.xz"
-        else:  # Darwin
-            asset_pattern = f"ffmpeg-{arch}-static.zip"
-        
-        for asset in release_data['assets']:
-            if asset_pattern.lower() in asset['name'].lower():
-                return {
-                    'url': asset['browser_download_url'],
-                    'size': asset['size'],
-                    'version': release_data['tag_name'],
-                    'name': asset['name']
-                }
-        
-        raise Exception(f"No matching release found for {system} {arch}")
-        
-    except Exception as e:
-        logger.error(f"Failed to get release info: {str(e)}")
-        return None
-
-def download_with_progress(url, dest_path, logger):
-    try:
-        headers = {}
-        if 'GITHUB_TOKEN' in os.environ:
-            headers['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
-        
-        response = requests.get(url, stream=True, headers=headers)
+        logger.info(f"Downloading {Fore.CYAN}{filename}{Style.RESET_ALL}")
+        response = requests.get(url, stream=True)
         response.raise_for_status()
         
         total_size = int(response.headers.get('content-length', 0))
-        block_size = 8192
         
-        logger.status(f"Starting download - Total size: {format_size(total_size)}")
+        if total_size:
+            logger.info(f"Size: {Fore.YELLOW}{format_size(total_size)}{Style.RESET_ALL}")
         
-        with open(dest_path, 'wb') as file, \
+        with open(save_path, 'wb') as file, \
              tqdm(
-                desc=f"{Fore.BLUE}Downloading",
+                desc=f"{Fore.GREEN}Downloading {filename}{Style.RESET_ALL}",
                 total=total_size,
                 unit='iB',
                 unit_scale=True,
                 unit_divisor=1024,
-                bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {rate_fmt}',
-                colour='blue'
+                bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
              ) as pbar:
             
-            start_time = time.time()
             downloaded = 0
+            start_time = time.time()
             
-            for chunk in response.iter_content(chunk_size=block_size):
+            for chunk in response.iter_content(chunk_size=8192):
                 size = file.write(chunk)
                 pbar.update(size)
                 downloaded += size
-                
-                elapsed = time.time() - start_time
-                if elapsed >= 1:
-                    speed = downloaded / (1024 * 1024 * elapsed)  # MB/s
-                    pbar.set_postfix({'Speed': f'{speed:.2f} MB/s'}, refresh=True)
-        
+            
+            duration = time.time() - start_time
+            speed = downloaded / (1024 * 1024 * duration)  # MB/s
+            
+        logger.info(f"Successfully downloaded {filename} - Speed: {Fore.GREEN}{speed:.2f} MB/s{Style.RESET_ALL}")
         return True
+    
     except Exception as e:
-        logger.error(f"Download failed: {str(e)}")
+        logger.error(f"Error downloading {filename}: {str(e)}")
         return False
-
-def extract_archive(archive_path, extract_path, logger):
-    try:
-        logger.status("Extracting files...")
-        if archive_path.endswith('.zip'):
-            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                for file in tqdm(zip_ref.namelist(), desc="Extracting"):
-                    zip_ref.extract(file, extract_path)
-        elif archive_path.endswith(('.tar.gz', '.tar.xz')):
-            with tarfile.open(archive_path) as tar_ref:
-                for file in tqdm(tar_ref.getmembers(), desc="Extracting"):
-                    tar_ref.extract(file, extract_path)
-        return True
-    except Exception as e:
-        logger.error(f"Extraction failed: {str(e)}")
-        return False
-
-def find_ffmpeg_files(directory, system):
-    required_files = REQUIRED_FILES[system]
-    found_files = {}
-    
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file in required_files or file.lower() in [f.lower() for f in required_files]:
-                found_files[file] = os.path.join(root, file)
-                
-    return found_files
-
-def install_ffmpeg(system, arch, install_dir, logger):
-    # Create installation directory
-    os.makedirs(install_dir, exist_ok=True)
-    
-    # Get latest release information
-    release_info = get_github_release(system, arch, logger)
-    if not release_info:
-        return False
-    
-    logger.status(f"Found FFmpeg version: {release_info['version']}")
-    
-    # Download archive
-    archive_path = os.path.join(install_dir, release_info['name'])
-    if not download_with_progress(release_info['url'], archive_path, logger):
-        return False
-    
-    # Extract archive
-    if not extract_archive(archive_path, install_dir, logger):
-        return False
-    
-    # Find and move FFmpeg files
-    found_files = find_ffmpeg_files(install_dir, system)
-    
-    # Move files to final location
-    for file_name, file_path in found_files.items():
-        target_path = os.path.join(install_dir, file_name)
-        if file_path != target_path:
-            shutil.move(file_path, target_path)
-    
-    # Clean up temporary files
-    logger.status("Cleaning up...")
-    try:
-        os.remove(archive_path)
-        # Remove empty directories
-        for root, dirs, files in os.walk(install_dir, topdown=False):
-            for name in dirs:
-                try:
-                    dir_path = os.path.join(root, name)
-                    if not os.listdir(dir_path):
-                        os.rmdir(dir_path)
-                except:
-                    pass
-    except Exception as e:
-        logger.warning(f"Cleanup failed: {str(e)}")
-    
-    # Verify installation
-    missing_files = [f for f in REQUIRED_FILES[system] 
-                    if not os.path.exists(os.path.join(install_dir, f))]
-    
-    if missing_files:
-        logger.error(f"Missing files: {', '.join(missing_files)}")
-        return False
-    
-    # Set executable permissions on Unix-like systems
-    if system != 'Windows':
-        for file_name in REQUIRED_FILES[system]:
-            file_path = os.path.join(install_dir, file_name)
-            if os.path.exists(file_path):
-                os.chmod(file_path, 0o755)
-    
-    return True
 
 def main():
-    logger = ColoredLogger()
+    logger = setup_logger()
+    system = platform.system()
     
-    # Get system information
-    system, arch = get_system_info()
-    logger.status(f"Detected system: {system} ({arch})")
+    logger.info(f"Detected system: {Fore.CYAN}{system}{Style.RESET_ALL}")
     
-    # Set installation directory
-    install_dir = os.path.join(os.getcwd(), 'ffmpeg', 'bin')
-    logger.status(f"Installation directory: {install_dir}")
-    
-    # Check if system is supported
-    if system not in GITHUB_API:
-        logger.error(f"Unsupported system: {system}")
-        return
-    
-    # Install FFmpeg
-    if install_ffmpeg(system, arch, install_dir, logger):
-        logger.success("FFmpeg installation completed successfully!")
-        logger.info(f"FFmpeg binaries location: {install_dir}")
+    if system == "Windows":
+        # Windows installation process
+        Path(FFMPEG_DIR).mkdir(parents=True, exist_ok=True)
+        logger.info(f"Installing FFmpeg components in: {Fore.CYAN}{FFMPEG_DIR}{Style.RESET_ALL}")
         
-        # Add usage instructions
-        if system == 'Windows':
-            logger.info("Add the following path to your system's PATH environment variable:")
-            logger.info(f"{install_dir}")
+        success_count = 0
+        total_components = len(FFMPEG_URLS)
+        
+        for filename, url in FFMPEG_URLS.items():
+            if download_windows_component(filename, url, logger):
+                success_count += 1
+        
+        if success_count == total_components:
+            logger.info(f"{Fore.GREEN}All FFmpeg components are ready!{Style.RESET_ALL}")
+            logger.info(f"Add {Fore.CYAN}{FFMPEG_DIR}{Style.RESET_ALL} to your system PATH")
         else:
-            logger.info("Add the following line to your ~/.bashrc or ~/.zshrc:")
-            logger.info(f"export PATH=\"{install_dir}:$PATH\"")
+            logger.warning(f"Downloaded {success_count}/{total_components} components. Some components may be missing.")
+    
     else:
-        logger.error("FFmpeg installation failed!")
+        # Unix-like systems (Linux/macOS) installation process
+        package_manager = detect_package_manager()
+        
+        if not package_manager:
+            logger.error("No supported package manager found. Please install FFmpeg manually.")
+            logger.info("Supported package managers: apt, dnf, yum, pacman, brew")
+            return
+        
+        if install_unix_ffmpeg(package_manager, logger):
+            logger.info(f"{Fore.GREEN}FFmpeg installation complete!{Style.RESET_ALL}")
+            # Verify installation
+            try:
+                result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    logger.info(f"FFmpeg version: {result.stdout.split('version')[1].split()[0]}")
+            except:
+                pass
+        else:
+            logger.error("FFmpeg installation failed!")
 
 if __name__ == "__main__":
     main()
