@@ -1,0 +1,13 @@
+Flask
+colorama
+python-dotenv
+ytmusicapi
+ntplib
+pytz
+bcrypt
+mutagen
+requests
+pyfiglet
+gunicorn
+tqdm
+termcolor
