@@ -10,34 +10,43 @@ from tqdm import tqdm
 import time
 import shutil
 import zipfile
+import tarfile
 import struct
+import json
+from datetime import datetime
 
-# Initialize colorama with autoreset
+# Initialize colorama
 init(autoreset=True)
 
-# FFmpeg URLs for different platforms and architectures
-FFMPEG_URLS = {
+# GitHub API endpoints and repositories
+GITHUB_API = {
     'Windows': {
-        '64bit': 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
-        '32bit': 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win32-gpl.zip'
+        'repo': 'BtbN/FFmpeg-Builds',
+        'api_url': 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
+    },
+    'Linux': {
+        'repo': 'FFmpeg/FFmpeg',
+        'api_url': 'https://api.github.com/repos/FFmpeg/FFmpeg/releases/latest'
+    },
+    'Darwin': {
+        'repo': 'FFmpeg/FFmpeg',
+        'api_url': 'https://api.github.com/repos/FFmpeg/FFmpeg/releases/latest'
     }
 }
 
-# Required executables
-REQUIRED_EXES = ['ffmpeg.exe', 'ffplay.exe', 'ffprobe.exe']
-
-# Directory setup
-FFMPEG_DIR = os.path.join(os.getcwd(), 'ffmpeg', 'bin')
+# Required files for each platform
+REQUIRED_FILES = {
+    'Windows': ['ffmpeg.exe', 'ffprobe.exe', 'ffplay.exe'],
+    'Linux': ['ffmpeg', 'ffprobe', 'ffplay'],
+    'Darwin': ['ffmpeg', 'ffprobe', 'ffplay']
+}
 
 class ColoredLogger:
     def __init__(self):
         self.logger = logging.getLogger('FFmpegDownloader')
         self.logger.setLevel(logging.INFO)
-        
-        # Remove existing handlers
         self.logger.handlers = []
         
-        # Console handler with custom formatter
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         
@@ -59,55 +68,76 @@ class ColoredLogger:
         console_handler.setFormatter(ColoredFormatter())
         self.logger.addHandler(console_handler)
 
-    def status(self, msg):
-        self.logger._log(100, msg, ())
-
-    def success(self, msg):
-        self.logger._log(101, msg, ())
-
-    def info(self, msg):
-        self.logger.info(msg)
-
-    def error(self, msg):
-        self.logger.error(msg)
-
-    def warning(self, msg):
-        self.logger.warning(msg)
+    def status(self, msg): self.logger._log(100, msg, ())
+    def success(self, msg): self.logger._log(101, msg, ())
+    def info(self, msg): self.logger.info(msg)
+    def error(self, msg): self.logger.error(msg)
+    def warning(self, msg): self.logger.warning(msg)
 
 def get_system_info():
     system = platform.system()
     machine = platform.machine().lower()
     
-    # Determine architecture
-    is_64bits = struct.calcsize('P') * 8 == 64
-    arch = '64bit' if is_64bits else '32bit'
-    
-    # Map architecture names
     arch_map = {
-        'amd64': '64bit',
-        'x86_64': '64bit',
-        'i386': '32bit',
-        'x86': '32bit',
-        'arm64': '64bit',
-        'aarch64': '64bit'
+        'x86_64': 'x64',
+        'amd64': 'x64',
+        'i386': 'x86',
+        'i686': 'x86',
+        'aarch64': 'arm64',
+        'arm64': 'arm64'
     }
     
-    if machine in arch_map:
-        arch = arch_map[machine]
+    arch = arch_map.get(machine, machine)
     
     return system, arch
 
 def format_size(size):
-    units = ['B', 'KB', 'MB', 'GB']
-    unit_index = 0
-    while size >= 1024 and unit_index < len(units) - 1:
-        size /= 1024
-        unit_index += 1
-    return f"{size:.2f} {units[unit_index]}"
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+
+def get_github_release(system, arch, logger):
+    headers = {}
+    if 'GITHUB_TOKEN' in os.environ:
+        headers['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
+    
+    try:
+        api_url = GITHUB_API[system]['api_url']
+        response = requests.get(api_url, headers=headers)
+        response.raise_for_status()
+        release_data = response.json()
+        
+        # Get assets based on system and architecture
+        if system == 'Windows':
+            asset_pattern = f"ffmpeg-master-latest-win{arch}-gpl.zip"
+        elif system == 'Linux':
+            asset_pattern = f"ffmpeg-release-{arch}-static.tar.xz"
+        else:  # Darwin
+            asset_pattern = f"ffmpeg-{arch}-static.zip"
+        
+        for asset in release_data['assets']:
+            if asset_pattern.lower() in asset['name'].lower():
+                return {
+                    'url': asset['browser_download_url'],
+                    'size': asset['size'],
+                    'version': release_data['tag_name'],
+                    'name': asset['name']
+                }
+        
+        raise Exception(f"No matching release found for {system} {arch}")
+        
+    except Exception as e:
+        logger.error(f"Failed to get release info: {str(e)}")
+        return None
 
 def download_with_progress(url, dest_path, logger):
     try:
-        response = requests.get(url, stream=True)
+        headers = {}
+        if 'GITHUB_TOKEN' in os.environ:
+            headers['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
+        
+        response = requests.get(url, stream=True, headers=headers)
         response.raise_for_status()
         
         total_size = int(response.headers.get('content-length', 0))
@@ -134,7 +164,6 @@ def download_with_progress(url, dest_path, logger):
                 pbar.update(size)
                 downloaded += size
                 
-                # Calculate and show speed every second
                 elapsed = time.time() - start_time
                 if elapsed >= 1:
                     speed = downloaded / (1024 * 1024 * elapsed)  # MB/s
@@ -145,82 +174,125 @@ def download_with_progress(url, dest_path, logger):
         logger.error(f"Download failed: {str(e)}")
         return False
 
-def extract_ffmpeg(zip_path, logger):
+def extract_archive(archive_path, extract_path, logger):
     try:
-        logger.status("Starting extraction process...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Find all exe files in the zip
-            exe_files = [f for f in zip_ref.namelist() if f.endswith('.exe') and '/bin/' in f]
-            
-            with tqdm(total=len(REQUIRED_EXES), desc=f"{Fore.BLUE}Extracting", colour='blue') as pbar:
-                for zip_path in exe_files:
-                    exe_name = os.path.basename(zip_path)
-                    if exe_name in REQUIRED_EXES:
-                        logger.info(f"Extracting {exe_name}")
-                        source = zip_ref.read(zip_path)
-                        target_path = os.path.join(FFMPEG_DIR, exe_name)
-                        with open(target_path, 'wb') as f:
-                            f.write(source)
-                        pbar.update(1)
+        logger.status("Extracting files...")
+        if archive_path.endswith('.zip'):
+            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                for file in tqdm(zip_ref.namelist(), desc="Extracting"):
+                    zip_ref.extract(file, extract_path)
+        elif archive_path.endswith(('.tar.gz', '.tar.xz')):
+            with tarfile.open(archive_path) as tar_ref:
+                for file in tqdm(tar_ref.getmembers(), desc="Extracting"):
+                    tar_ref.extract(file, extract_path)
         return True
     except Exception as e:
         logger.error(f"Extraction failed: {str(e)}")
         return False
+
+def find_ffmpeg_files(directory, system):
+    required_files = REQUIRED_FILES[system]
+    found_files = {}
+    
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file in required_files or file.lower() in [f.lower() for f in required_files]:
+                found_files[file] = os.path.join(root, file)
+                
+    return found_files
+
+def install_ffmpeg(system, arch, install_dir, logger):
+    # Create installation directory
+    os.makedirs(install_dir, exist_ok=True)
+    
+    # Get latest release information
+    release_info = get_github_release(system, arch, logger)
+    if not release_info:
+        return False
+    
+    logger.status(f"Found FFmpeg version: {release_info['version']}")
+    
+    # Download archive
+    archive_path = os.path.join(install_dir, release_info['name'])
+    if not download_with_progress(release_info['url'], archive_path, logger):
+        return False
+    
+    # Extract archive
+    if not extract_archive(archive_path, install_dir, logger):
+        return False
+    
+    # Find and move FFmpeg files
+    found_files = find_ffmpeg_files(install_dir, system)
+    
+    # Move files to final location
+    for file_name, file_path in found_files.items():
+        target_path = os.path.join(install_dir, file_name)
+        if file_path != target_path:
+            shutil.move(file_path, target_path)
+    
+    # Clean up temporary files
+    logger.status("Cleaning up...")
+    try:
+        os.remove(archive_path)
+        # Remove empty directories
+        for root, dirs, files in os.walk(install_dir, topdown=False):
+            for name in dirs:
+                try:
+                    dir_path = os.path.join(root, name)
+                    if not os.listdir(dir_path):
+                        os.rmdir(dir_path)
+                except:
+                    pass
+    except Exception as e:
+        logger.warning(f"Cleanup failed: {str(e)}")
+    
+    # Verify installation
+    missing_files = [f for f in REQUIRED_FILES[system] 
+                    if not os.path.exists(os.path.join(install_dir, f))]
+    
+    if missing_files:
+        logger.error(f"Missing files: {', '.join(missing_files)}")
+        return False
+    
+    # Set executable permissions on Unix-like systems
+    if system != 'Windows':
+        for file_name in REQUIRED_FILES[system]:
+            file_path = os.path.join(install_dir, file_name)
+            if os.path.exists(file_path):
+                os.chmod(file_path, 0o755)
+    
+    return True
 
 def main():
     logger = ColoredLogger()
     
     # Get system information
     system, arch = get_system_info()
-    logger.status(f"System detected: {system} ({arch})")
+    logger.status(f"Detected system: {system} ({arch})")
+    
+    # Set installation directory
+    install_dir = os.path.join(os.getcwd(), 'ffmpeg', 'bin')
+    logger.status(f"Installation directory: {install_dir}")
     
     # Check if system is supported
-    if system != 'Windows':
-        logger.error("This script is for Windows only!")
+    if system not in GITHUB_API:
+        logger.error(f"Unsupported system: {system}")
         return
     
-    if arch not in FFMPEG_URLS[system]:
-        logger.error(f"Unsupported architecture: {arch}")
-        return
-    
-    # Create directory
-    Path(FFMPEG_DIR).mkdir(parents=True, exist_ok=True)
-    logger.status(f"Using directory: {FFMPEG_DIR}")
-    
-    # Check existing files
-    existing_files = [exe for exe in REQUIRED_EXES if os.path.exists(os.path.join(FFMPEG_DIR, exe))]
-    if existing_files:
-        logger.info(f"Found existing files: {', '.join(existing_files)}")
-        if len(existing_files) == len(REQUIRED_EXES):
-            logger.success("All required files already exist!")
-            return
-    
-    # Download FFmpeg
-    zip_path = os.path.join(FFMPEG_DIR, 'ffmpeg.zip')
-    url = FFMPEG_URLS[system][arch]
-    
-    logger.status(f"Downloading FFmpeg for {system} {arch}")
-    if not download_with_progress(url, zip_path, logger):
-        return
-    
-    # Extract files
-    if not extract_ffmpeg(zip_path, logger):
-        return
-    
-    # Clean up
-    try:
-        os.remove(zip_path)
-        logger.info("Cleaned up temporary files")
-    except Exception as e:
-        logger.warning(f"Could not remove temporary file: {str(e)}")
-    
-    # Verify installation
-    missing_files = [exe for exe in REQUIRED_EXES if not os.path.exists(os.path.join(FFMPEG_DIR, exe))]
-    if missing_files:
-        logger.error(f"Missing files after installation: {', '.join(missing_files)}")
-    else:
+    # Install FFmpeg
+    if install_ffmpeg(system, arch, install_dir, logger):
         logger.success("FFmpeg installation completed successfully!")
-        logger.info(f"FFmpeg binaries location: {FFMPEG_DIR}")
+        logger.info(f"FFmpeg binaries location: {install_dir}")
+        
+        # Add usage instructions
+        if system == 'Windows':
+            logger.info("Add the following path to your system's PATH environment variable:")
+            logger.info(f"{install_dir}")
+        else:
+            logger.info("Add the following line to your ~/.bashrc or ~/.zshrc:")
+            logger.info(f"export PATH=\"{install_dir}:$PATH\"")
+    else:
+        logger.error("FFmpeg installation failed!")
 
 if __name__ == "__main__":
     main()
