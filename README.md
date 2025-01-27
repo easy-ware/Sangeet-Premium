@@ -79,7 +79,8 @@ python3 run_server.py
 - SQLite for database
 - FFmpeg for audio processing
 - Yt-Dlp for media handling
-
+## Warning
+Only accesa the sangeet on other devices via the generated cloudflared .trycloudflare.com tunnel else local ips like 192.168.0.1 like not work..
 ## 🤝 Contributing
 We welcome contributions! Please feel free to submit pull requests.
 
