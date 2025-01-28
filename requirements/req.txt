@@ -4,6 +4,7 @@ python-dotenv
 ytmusicapi
 ntplib
 pytz
+yt-dlp
 bcrypt
 mutagen
 requests
