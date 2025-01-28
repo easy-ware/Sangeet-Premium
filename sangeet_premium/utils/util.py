@@ -1461,8 +1461,6 @@ def download_flac_init(video_id: str) -> str:
         logger.error(f"Error downloading song {video_id} during initialization: {str(e)}")
         return None
 
-
-
 def download_with_executable(video_id: str, user_id: int | None, url: str, flac_path: str, is_init: bool) -> str:
     """Helper function to download using yt-dlp executable"""
     # Get metadata first
@@ -1493,10 +1491,9 @@ def download_with_executable(video_id: str, user_id: int | None, url: str, flac_
         "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
     ]
     
-    # Add ffmpeg location based on platform
-    ffmpeg_path = FFMPEG_BIN_DIR
-    if ffmpeg_path:
-        command.extend(["--ffmpeg-location", ffmpeg_path])
+    # Only add ffmpeg path on Windows
+    if platform.system() == "Windows":
+        command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
     
     command.append(url)
     
@@ -1538,10 +1535,9 @@ def download_with_module(video_id: str, user_id: int | None, url: str, flac_path
         'writeinfojson': True,
     }
 
-    # Add ffmpeg location based on platform
-    ffmpeg_path = FFMPEG_BIN_DIR
-    if ffmpeg_path:
-        ydl_opts['ffmpeg_location'] = ffmpeg_path
+    # Only add ffmpeg path on Windows
+    if platform.system() == "Windows":
+        ydl_opts['ffmpeg_location'] = FFMPEG_BIN_DIR
 
     with YoutubeDL(ydl_opts) as ydl:
         # Extract metadata first
