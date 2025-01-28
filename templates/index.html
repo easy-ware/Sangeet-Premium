@@ -4288,55 +4288,120 @@ function showNotification(type, title, message, duration = 5000) {
 // showNotification('info', 'Quick Note', 'This will disappear in 2 seconds', 2000);
   </script>
   <script>
-    // Add to the existing audio event listeners
+ // Add enhanced progress loading styles
+const progressLoadingStyles = document.createElement('style');
+progressLoadingStyles.textContent = `
+  /* Progress Skeleton Loading Styles */
+  .progress-skeleton {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      var(--surface-color) 25%,
+      var(--card-color) 50%,
+      var(--surface-color) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  /* Progress Bar Loading State */
+  .progress-bar.loading {
+    height: 12px;
+    opacity: 0.3;
+    transition: all 0.3s ease;
+  }
+
+  /* Progress Bar Loading Animation */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* Time Indicator Loading State */
+  .time-indicator.loading {
+    opacity: 0.5;
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 0.2; }
+  }
+
+  /* Mobile Specific Progress Bar Adjustments */
+  @media (max-width: 768px) {
+    .progress-bar.loading {
+      height: 14px;
+    }
+  }
+`;
+document.head.appendChild(progressLoadingStyles);
+
+// Enhanced progress loading management
 function enhanceProgressLoading() {
-  const audio = E.audio;
-  const miniProgress = E.progressBar;
-  const fullProgress = E.fullProgressBar;
-  const progressSkeleton = E.progressSkeleton;
-  const timeIndicators = document.querySelectorAll('.time-indicator');
+    const audio = E.audio;
+    const miniProgress = E.progressBar;
+    const fullProgress = E.fullProgressBar;
+    const progressSkeleton = E.progressSkeleton;
+    const timeIndicators = document.querySelectorAll('.time-indicator');
+    const progressBars = document.querySelectorAll('.progress-bar');
 
-  function showLoading() {
-    progressSkeleton.classList.add('active');
-    miniProgress.parentElement.classList.add('progress-loading');
-    fullProgress.parentElement.classList.add('progress-loading');
-    timeIndicators.forEach(indicator => indicator.classList.add('loading'));
-  }
+    function showLoading() {
+        progressSkeleton.style.opacity = "1";
+        progressBars.forEach(bar => bar.classList.add('loading'));
+        timeIndicators.forEach(indicator => indicator.classList.add('loading'));
+    }
 
-  function hideLoading() {
-    progressSkeleton.classList.remove('active');
-    miniProgress.parentElement.classList.remove('progress-loading');
-    fullProgress.parentElement.classList.remove('progress-loading');
-    timeIndicators.forEach(indicator => indicator.classList.remove('loading'));
-  }
+    function hideLoading() {
+        progressSkeleton.style.opacity = "0";
+        progressBars.forEach(bar => bar.classList.remove('loading'));
+        timeIndicators.forEach(indicator => indicator.classList.remove('loading'));
+    }
 
-  // Loading states
-  audio.addEventListener('waiting', showLoading);
-  audio.addEventListener('seeking', showLoading);
-  audio.addEventListener('loadstart', showLoading);
+    // Show loading on audio events
+    audio.addEventListener('loadstart', showLoading);
+    audio.addEventListener('waiting', showLoading);
+    audio.addEventListener('seeking', showLoading);
+    audio.addEventListener('stalled', showLoading);
 
-  // Playing states
-  audio.addEventListener('canplay', hideLoading);
-  audio.addEventListener('playing', hideLoading);
-  audio.addEventListener('seeked', hideLoading);
+    // Hide loading when ready
+    audio.addEventListener('canplay', hideLoading);
+    audio.addEventListener('playing', hideLoading);
+    audio.addEventListener('seeked', hideLoading);
 
-  // Error handling
-  audio.addEventListener('error', () => {
-    hideLoading();
-    showToast('error', 'Playback Error', 'Failed to load audio. Please try again.');
-  });
+    // Handle errors
+    audio.addEventListener('error', () => {
+        hideLoading();
+        showToast('error', 'Playback Error', 'Failed to load audio. Please try again.');
+    });
 
-  // Initial state
-  if (audio.readyState < 3) {
-    showLoading();
-  }
+    // Modify setupInitialSong to show loading state immediately
+    const originalSetupInitialSong = window.setupInitialSong;
+    window.setupInitialSong = async function() {
+        showLoading(); // Show loading immediately
+        try {
+            await originalSetupInitialSong.apply(this, arguments);
+        } catch (error) {
+            console.error('Setup initial song error:', error);
+            hideLoading();
+        }
+    };
+
+    // Show loading state initially if not ready
+    if (audio.readyState < 3) {
+        showLoading();
+    }
 }
 
-// Add to initialization
-document.addEventListener('DOMContentLoaded', () => {
-  enhanceProgressLoading();
-  // ... rest of initialization code
-});
+// Initialize the enhanced progress loading
+document.addEventListener('DOMContentLoaded', enhanceProgressLoading);
   </script>
   <script>
     //  async function setFavicons() {
