@@ -110,13 +110,14 @@ if __name__ == '__main__':
 
     def setup_logging(app, log_level=logging.INFO):
         """
-        Optimized Flask logging with reduced repetition and better organization
+        Enhanced Flask logging with Unicode support, better error handling,
+        and improved organization while maintaining original functionality
         """
         init()
         os.makedirs('logs', exist_ok=True)
         log_file = f"logs/{datetime.now():%Y%m%d_%H%M}.log"
 
-        class RequestFormatter(logging.Formatter):
+        class EnhancedRequestFormatter(logging.Formatter):
             COLORS = {
                 'DEBUG': Fore.BLUE,
                 'INFO': Fore.GREEN,
@@ -128,7 +129,10 @@ if __name__ == '__main__':
             SKIP_PATHS = {
                 '/favicon.ico', 
                 '/audioworklet/qualityProcessor.js',
-                '/data/download/icons/'
+                '/data/download/icons/',
+                '/api/session-status',  # Add common status checks
+                '/static/',  # Skip static file requests
+                '/design/'   # Skip design file requests
             }
 
             def __init__(self, *args, use_color=False, **kwargs):
@@ -145,46 +149,88 @@ if __name__ == '__main__':
                 return not any(path.startswith(skip) for skip in self.SKIP_PATHS)
 
             def format(self, record):
-                if has_request_context():
-                    # Add request ID if not present
-                    if not hasattr(g, 'request_id'):
-                        g.request_id = str(uuid.uuid4())[:8]
-                    record.request_id = g.request_id
+                try:
+                    if has_request_context():
+                        # Add request ID if not present
+                        if not hasattr(g, 'request_id'):
+                            g.request_id = str(uuid.uuid4())[:8]
+                        record.request_id = g.request_id
 
-                    # Clean and format the URL
-                    path = request.path
-                    if not self.should_log_path(path):
-                        return None
+                        # Clean and format the URL
+                        path = request.path
+                        if not self.should_log_path(path):
+                            return None
 
-                    # Format message based on type
-                    if hasattr(record, 'response_included'):
-                        msg = (f"{self.colorize(record.levelname)} [{record.request_id}] "
-                            f"{request.method} {path} → {record.response_status}")
-                        if record.body and record.body != "b''":
-                            msg += f"\n    Body: {record.body}"
-                        return msg
-                else:
-                    # Non-request logs
-                    return f"{self.colorize(record.levelname)} {record.getMessage()}"
+                        # Add timing information
+                        if hasattr(g, 'request_start'):
+                            duration = datetime.now() - g.request_start
+                            duration_ms = int(duration.total_seconds() * 1000)
+                        else:
+                            duration_ms = 0
 
-                return None
+                        # Format message based on type
+                        if hasattr(record, 'response_included'):
+                            msg = (f"{self.colorize(record.levelname)} [{record.request_id}] "
+                                f"{request.method} {path} → {record.response_status} ({duration_ms}ms)")
+                            
+                            # Add response size if available
+                            if hasattr(record, 'response_size'):
+                                msg += f" [{self.format_size(record.response_size)}]"
+                                
+                            # Add body for non-GET requests with content
+                            if record.body and record.body != "b''" and request.method != 'GET':
+                                msg += f"\n    Body: {record.body}"
+                            return msg
+                    else:
+                        # Non-request logs
+                        return f"{self.colorize(record.levelname)} {record.getMessage()}"
+
+                    return None
+                except Exception as e:
+                    # Fallback formatting if there's an error
+                    return f"[LOGGING ERROR: {str(e)}] {record.getMessage()}"
+
+            def format_size(self, size):
+                """Format response size in human readable format"""
+                for unit in ['B', 'KB', 'MB', 'GB']:
+                    if size < 1024:
+                        return f"{size:.1f}{unit}"
+                    size /= 1024
+                return f"{size:.1f}TB"
+
+        class UTFRotatingFileHandler(RotatingFileHandler):
+            """Enhanced RotatingFileHandler with proper UTF-8 handling"""
+            def emit(self, record):
+                try:
+                    msg = self.format(record)
+                    if msg:  # Only write if there's a message
+                        # Ensure proper UTF-8 encoding
+                        if isinstance(msg, str):
+                            msg = msg.encode('utf-8')
+                        stream = self.stream
+                        stream.write(msg)
+                        stream.write(self.terminator.encode('utf-8') if isinstance(self.terminator, str) else self.terminator)
+                        self.flush()
+                except Exception:
+                    self.handleError(record)
 
         # Configure handlers
         handlers = []
         
         # Console handler with colors
         console = logging.StreamHandler()
-        console.setFormatter(RequestFormatter(use_color=True))
+        console.setFormatter(EnhancedRequestFormatter(use_color=True))
         console.addFilter(lambda record: record.levelno >= log_level)
         handlers.append(console)
         
         # File handler with rotation (10MB files, keep 5 backups)
-        file_handler = RotatingFileHandler(
+        file_handler = UTFRotatingFileHandler(
             log_file,
             maxBytes=10_000_000,
-            backupCount=5
+            backupCount=5,
+            encoding='utf-8'
         )
-        file_handler.setFormatter(RequestFormatter(use_color=False))
+        file_handler.setFormatter(EnhancedRequestFormatter(use_color=False))
         handlers.append(file_handler)
 
         # Clear existing handlers and configure logger
@@ -199,30 +245,41 @@ if __name__ == '__main__':
         def before_request():
             g.request_start = datetime.now()
             # Skip logging for ignored paths
-            if RequestFormatter.should_log_path(RequestFormatter(), request.path):
+            if EnhancedRequestFormatter.should_log_path(EnhancedRequestFormatter(), request.path):
                 g.log_request = True
-                g.request_body = request.get_data()
+                # Only store body for non-GET requests
+                if request.method != 'GET':
+                    g.request_body = request.get_data()
 
         @app.after_request
         def after_request(response):
-            if hasattr(g, 'log_request'):
-                # Combine request and response info into a single log entry
-                record = logging.LogRecord(
-                    name=app.logger.name,
-                    level=logging.INFO,
-                    pathname='',
-                    lineno=0,
-                    msg='',
-                    args=(),
-                    exc_info=None
-                )
-                record.response_included = True
-                record.response_status = response.status
-                record.body = str(g.request_body) if g.request_body else None
-                app.logger.handle(record)
+            try:
+                if hasattr(g, 'log_request'):
+                    # Combine request and response info into a single log entry
+                    record = logging.LogRecord(
+                        name=app.logger.name,
+                        level=logging.INFO,
+                        pathname='',
+                        lineno=0,
+                        msg='',
+                        args=(),
+                        exc_info=None
+                    )
+                    record.response_included = True
+                    record.response_status = response.status
+                    record.response_size = len(response.get_data())
+                    record.body = str(getattr(g, 'request_body', None)) if request.method != 'GET' else None
+                    app.logger.handle(record)
+            except Exception as e:
+                app.logger.error(f"Logging error: {e}")
             return response
 
-        app.logger.info("Logging initialized")
+        @app.errorhandler(Exception)
+        def log_exception(e):
+            app.logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+            return "Internal Server Error", 500
+
+        app.logger.info("Enhanced logging initialized")
         return app.logger
     def run_production_server(app, port=8000):
         """Run server with proper logging"""
