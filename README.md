@@ -60,6 +60,7 @@ Also install the depedencies like ffmpeg , cloudflared for your system if termux
 
 
 # Run the application
+```
 python run_server.py
 # or
 python3 run_server.py
