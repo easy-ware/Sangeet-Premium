@@ -1384,7 +1384,7 @@ def send_email(to_email, subject, body):
         return False
     
 
-def download_flac_init(video_id: str, user_id: int) -> str:
+def download_flac_init(video_id: str) -> str:
     """
     Download song with metadata and thumbnail using yt-dlp.exe with fallback to yt-dlp module.
     
