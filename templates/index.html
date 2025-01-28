@@ -955,66 +955,6 @@ function updateVolumeIcon(volume) {
   });
 }
 
-/**
- * Media Playback Functions
- * Core playback functionality and state management
- */
-
-/**
- * Load and play a song
- * @param {string} songId - ID of the song to play
- */
-//  async function loadAndPlay(songId) {
-//   if (songId === state.currentSongId) {
-//     togglePlay();
-//     return;
-//   }
-
-//   state.currentSongId = songId;
-//   E.miniPlayer.classList.remove("hidden");
-
-//   // Reset UI placeholders
-//   resetPlayerUI();
-
-//   try {
-//     // Get song info and stream URL in parallel
-//     const [infoData, streamData] = await Promise.all([
-//       fetch(`/api/song-info/${songId}`).then(r => r.json()),
-//       fetch(`/api/stream/${songId}`).then(r => r.json())
-//     ]);
-
-//     if (infoData.error) throw new Error(infoData.error);
-//     if (streamData.error) throw new Error(streamData.error);
-
-//     // Start new listening session
-//     await startListeningSession(songId, infoData.title, infoData.artist);
-
-//     // Update audio source
-//     E.audio.src = streamData.url;
-
-//     // Update both mini and full player info
-//     updatePlayerInfo(infoData);
-
-//     // Load additional content
-//     loadLyrics(songId);
-//     loadArtistInfo(infoData.artist);
-
-//     // Attempt to play
-//     try {
-//       await E.audio.play();
-//       updatePlayPauseUI(true);
-//       syncProgress();
-//     } catch (playError) {
-//       console.warn("Autoplay prevented:", playError);
-//       showPlayHint();
-//     }
-
-//   } catch(e) {
-//     console.error("loadAndPlay error:", e);
-//     resetPlayerUI();
-//     showToast("Failed to load song. Please try again.");
-//   }
-// }
 
 /**
  * Toggle play/pause state
@@ -1060,8 +1000,6 @@ function initializeAudio() {
 }
 
 
-
-// Modified loadAndPlay function - keeping original structure but adding play safety
 async function loadAndPlay(songId) {
     if (songId === state.currentSongId) {
         togglePlay();
