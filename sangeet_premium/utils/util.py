@@ -1485,9 +1485,8 @@ def download_with_executable(video_id: str, user_id: int | None, url: str, flac_
         "--extract-audio",
         "--audio-format", "flac",
         "--audio-quality", "0",
+        "--embed-metadata",
         "--embed-thumbnail",
-        "--add-metadata",
-        "--parse-metadata", ":(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)",
         "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
     ]
     
@@ -1509,51 +1508,88 @@ def download_with_executable(video_id: str, user_id: int | None, url: str, flac_
     raise Exception(f"Executable download failed with code {download_result.returncode}")
 
 def download_with_module(video_id: str, user_id: int | None, url: str, flac_path: str, is_init: bool) -> str:
-    """Helper function to download using yt-dlp Python module"""
+    """Helper function to download using yt-dlp Python module with optimized settings"""
     ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'format': 'bestaudio',
-        'writethumbnail': True,
+        # Basic options
+        'format': 'bestaudio/best',  # Get best quality audio
+        'outtmpl': os.path.join(MUSIC_DIR, '%(id)s.%(ext)s'),
+        
+        # Audio processing
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'flac',
-            'preferredquality': '0',
+            'preferredquality': '0',  # Best quality
+            'nopostoverwrites': False,  # Allow overwriting postprocessed files
         }, {
-            'key': 'EmbedThumbnail',
-        }, {
+            # Add metadata
             'key': 'FFmpegMetadata',
             'add_metadata': True,
+            'add_chapters': True,
         }, {
-            'key': 'ThumbnailsConvertor',
-            'format': 'jpg',
+            # Add thumbnail
+            'key': 'EmbedThumbnail',
+            'already_have_thumbnail': False,
         }],
-        'outtmpl': os.path.join(MUSIC_DIR, '%(id)s.%(ext)s'),
-        'parse_metadata': ':(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)',
-        'add_metadata': True,
-        'embed_thumbnail': True,
-        'writeinfojson': True,
+        
+        # Additional options
+        'writethumbnail': True,  # Write thumbnail to disk before embedding
+        'embedthumbnail': True,  # Embed thumbnail in audio file
+        'addmetadata': True,     # Write metadata to file
+        'prefer_ffmpeg': True,   # Prefer ffmpeg for post-processing
+        
+        # Quality settings
+        'audioformat': 'flac',   # Force FLAC format
+        'audioquality': '0',     # Best quality
+        
+        # Optimization settings
+        'concurrent_fragment_downloads': 1,  # Download fragments concurrently
+        'retries': 10,           # Retry on download errors
+        'fragment_retries': 10,  # Retry on fragment download errors
+        
+        # Output settings
+        'extract_flat': False,   # Extract audio
+        'keepvideo': False,      # Don't keep video file after extraction
+        'clean_infojson': True,  # Remove info json after download
+        
+        # Progress settings
+        'progress_hooks': [],    # Can add progress tracking if needed
+        'postprocessor_hooks': [], # Can add post-processing tracking
     }
 
-    # Only add ffmpeg path on Windows
-    if platform.system() == "Windows":
-        ydl_opts['ffmpeg_location'] = FFMPEG_BIN_DIR
-
-    with YoutubeDL(ydl_opts) as ydl:
-        # Extract metadata first
-        info = ydl.extract_info(url, download=False)
-        title = info.get('title', '')
-        artist = info.get('artist', '')
-        album = info.get('album', '')
-        
-        # Download the file with all metadata and thumbnails
-        ydl.download([url])
-        
-        if os.path.exists(flac_path):
-            if not is_init:
-                record_download(video_id, title, artist, album, flac_path, user_id)
-                load_local_songs()
-            logger.info(f"Successfully downloaded {video_id} using module")
-            return flac_path
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            # Extract metadata first
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title', '')
+            artist = info.get('artist', '')
+            album = info.get('album', '')
             
-        raise Exception("Module download failed - file not found")
+            # Get additional metadata if available
+            track = info.get('track', '')
+            release_year = info.get('release_year', '')
+            release_date = info.get('release_date', '')
+            genre = info.get('genre', '')
+            
+            # Download and process the file
+            ydl.download([url])
+            
+            if os.path.exists(flac_path):
+                if not is_init:
+                    # Record download with extended metadata
+                    record_download(
+                        video_id=video_id,
+                        title=title or track or "Unknown Title",
+                        artist=artist or "Unknown Artist",
+                        album=album or "Unknown Album",
+                        path=flac_path,
+                        user_id=user_id
+                    )
+                    load_local_songs()
+                logger.info(f"Successfully downloaded {video_id} using module")
+                return flac_path
+                
+            raise Exception("Module download failed - file not found")
+            
+    except Exception as e:
+        logger.error(f"Download error for {video_id}: {str(e)}")
+        raise Exception(f"Download failed: {str(e)}")
