@@ -7,6 +7,7 @@ import logging
 from flask import session, redirect
 from functools import wraps
 import smtplib
+from yt_dlp import YoutubeDL
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import re
@@ -38,6 +39,70 @@ DB_PATH = os.path.join(os.getcwd() , "database_files" , "sangeet_database_main.d
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+CACHE_DURATION = 3600  # 1 hour in seconds
+search_cache = {}
+
+MAX_SEARCH_RESULTS = 50  # Increased from default
+@lru_cache(maxsize=100)
+def search_songs(query: str, limit: int = MAX_SEARCH_RESULTS):
+    """
+    Enhanced search function that combines multiple sources and returns more results.
+    Supports both local library and YouTube Music searches.
+    """
+    now_ts = datetime.now().timestamp()
+    cache_key = f"{query}_{limit}"
+    
+    if cache_key in search_cache:
+        old_data, old_ts = search_cache[cache_key]
+        if now_ts - old_ts < CACHE_DURATION:
+            return old_data
+            
+    try:
+        # Search YouTube Music
+        yt_results = ytmusic.search(query, filter="songs", limit=limit)
+        seen_titles = set()  # Track seen title+artist combinations
+        results = []
+        
+        for item in yt_results:
+            vid = item.get("videoId")
+            if not vid:
+                continue
+                
+            artist = "Unknown Artist"
+            if item.get("artists"):
+                artist = item["artists"][0].get("name", "Unknown Artist")
+                
+            title = item.get("title", "Unknown")
+            title_artist = (title.lower(), artist.lower())
+            
+            # Skip if we've seen this title+artist combination
+            if title_artist in seen_titles:
+                continue
+                
+            dur = item.get("duration_seconds", 0)
+            thumb = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+            
+            # Add source identifier
+            results.append({
+                "id": vid,
+                "title": title,
+                "artist": artist,
+                "album": item.get("album", {}).get("name", ""),
+                "duration": dur,
+                "thumbnail": thumb,
+                "source": "youtube",
+                "url": f"https://music.youtube.com/watch?v={vid}"
+            })
+            
+            seen_titles.add(title_artist)
+            
+        search_cache[cache_key] = (results, now_ts)
+        return results
+        
+    except Exception as e:
+        logger.error(f"search_songs error: {e}")
+        return []
 
 def setup_ytdlp():
     """
@@ -787,57 +852,6 @@ def filter_local_songs(query: str):
     
     return out
 
-@lru_cache(maxsize=100)
-def search_songs(query: str):
-    """YTMusic search (songs) with deduplication, cached for 1 hour."""
-    now_ts = datetime.now().timestamp()
-    if query in search_cache:
-        old_data, old_ts = search_cache[query]
-        if now_ts - old_ts < CACHE_DURATION:
-            return old_data
-            
-    try:
-        raw = ytmusic.search(query, filter="songs")
-        seen_titles = set()  # Track seen title+artist combinations
-        results = []
-        
-        for item in raw:
-            vid = item.get("videoId")
-            if not vid:
-                continue
-                
-            artist = "Unknown Artist"
-            if item.get("artists"):
-                artist = item["artists"][0].get("name", "Unknown Artist")
-                
-            title = item.get("title", "Unknown")
-            title_artist = (title.lower(), artist.lower())
-            
-            # Skip if we've seen this title+artist combination
-            if title_artist in seen_titles:
-                continue
-                
-            dur = item.get("duration_seconds", 0)
-            thumb = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-            
-            results.append({
-                "id": vid,
-                "title": title,
-                "artist": artist,
-                "album": "",
-                "duration": dur,
-                "thumbnail": thumb
-            })
-            
-            seen_titles.add(title_artist)
-            
-        search_cache[query] = (results, now_ts)
-        return results
-        
-    except Exception as e:
-        logger.error(f"search_songs error: {e}")
-        return []
-    
 
 
 def fallback_recommendations():
@@ -996,102 +1010,6 @@ def get_fallback_tracks(seen_songs):
         return []
 
 
-@login_required
-def download_flac(video_id: str, user_id: int) -> str:
-    """
-    Download song with metadata and thumbnail using yt-dlp.exe.
-    Now requires user_id for proper tracking.
-    
-    Args:
-        video_id: str - The YouTube video ID
-        user_id: int - The ID of the user downloading the song
-        
-    Returns:
-        str: Path to the FLAC file if successful or existing, None if failed
-    """
-    try:
-        # First check if we already have this song downloaded
-        existing_path = get_download_info(video_id)
-        if existing_path:
-            # Verify the file actually exists on disk
-            if os.path.exists(existing_path):
-                logger.info(f"Using existing download for {video_id}")
-                load_local_songs()
-                return existing_path
-            else:
-                load_local_songs()
-                # File record exists but file is missing - clean up DB
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
-                conn.commit()
-                conn.close()
-
-        # File not found - proceed with download
-        flac_path = os.path.join(MUSIC_DIR, f"{video_id}.flac")
-        
-        # Check if file exists but isn't in database
-        if os.path.exists(flac_path):
-            return flac_path
-        # Need to download the file
-        logger.info(f"Downloading new song: {video_id}")
-        yt_music_url = f"https://music.youtube.com/watch?v={video_id}"
-
-        # Get metadata first
-        result = subprocess.run([
-            YTDLP_PATH,
-            "--quiet",
-            "--print", "%(title)s",
-            "--print", "%(artist)s",
-            "--print", "%(album)s",
-            yt_music_url
-        ], capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logger.error(f"Error getting metadata: {result.stderr}")
-            return None
-            
-        title, artist, album = result.stdout.strip().split("\n")
-
-        # Create base command list
-        command = [
-            YTDLP_PATH,
-            "--quiet",
-            "--no-warnings",
-            "--extract-audio",
-            "--audio-format", "flac",
-            "--audio-quality", "0",
-            "--embed-thumbnail",
-            "--add-metadata",
-            "--parse-metadata", ":(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)",
-            "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
-        ]
-        
-        # Only add FFmpeg path on Windows
-        if platform.system() == "Windows":
-            command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
-        
-        # Add the URL at the end
-        command.append(yt_music_url)
-        
-        # Run the download
-        download_result = subprocess.run(command)
-
-        # Verify download succeeded
-        if download_result.returncode == 0 and os.path.exists(flac_path):
-            record_download(video_id, title, artist, album, flac_path, user_id)
-            logger.info(f"Successfully downloaded {video_id}")
-            load_local_songs()
-            return flac_path
-            
-        logger.error(f"Download failed with exit code {download_result.returncode}")
-        return None
-
-    except Exception as e:
-        logger.error(f"Error downloading song {video_id}: {str(e)}")
-        
-        return None
-    
 @lru_cache(maxsize=1000)
 @login_required
 def fetch_image(url):
@@ -1435,78 +1353,6 @@ def verify_otp(email, otp, purpose):
     return valid
 
 
-def download_flac_init(video_id: str) -> str:
-    """Version of download_flac that works during initialization"""
-    try:
-        # First check if we already have this song downloaded
-        existing_path = get_download_info(video_id)
-        if existing_path and os.path.exists(existing_path):
-            logger.info(f"Using existing download for {video_id}")
-            return existing_path
-
-        # File not found - proceed with download
-        flac_path = os.path.join(MUSIC_DIR, f"{video_id}.flac")
-        
-        # Check if file exists but isn't in database
-        if os.path.exists(flac_path):
-            return flac_path
-
-        # Need to download the file
-        logger.info(f"Downloading new song during initialization: {video_id}")
-        yt_music_url = f"https://music.youtube.com/watch?v={video_id}"
-
-        # Get metadata first
-        result = subprocess.run([
-            YTDLP_PATH,
-            "--quiet",
-            "--print", "%(title)s",
-            "--print", "%(artist)s",
-            "--print", "%(album)s",
-            yt_music_url
-        ], capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logger.error(f"Error getting metadata: {result.stderr}")
-            return None
-            
-        title, artist, album = result.stdout.strip().split("\n")
-
-        # Create base command list
-        command = [
-            YTDLP_PATH,
-            "--quiet",
-            "--no-warnings",
-            "--extract-audio",
-            "--audio-format", "flac",
-            "--audio-quality", "0",
-            "--embed-thumbnail",
-            "--add-metadata",
-            "--parse-metadata", ":(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)",
-            "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
-        ]
-        
-        # Only add FFmpeg path on Windows
-        if platform.system() == "Windows":
-            command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
-        
-        command.append(yt_music_url)
-        
-        # Run the download
-        download_result = subprocess.run(command)
-
-        # Verify download succeeded
-        if download_result.returncode == 0 and os.path.exists(flac_path):
-            # Use a default system user ID for initialization downloads
-            record_download(video_id, title, artist, album, flac_path, user_id=1)
-            logger.info(f"Successfully downloaded {video_id}")
-            return flac_path
-            
-        logger.error(f"Download failed with exit code {download_result.returncode}")
-        return None
-
-    except Exception as e:
-        
-        return None
 
 def download_default_songs():
     default_songs = ["dQw4w9WgXcQ", "kJQP7kiw5Fk", "9bZkp7q19f0"]
@@ -1536,3 +1382,182 @@ def send_email(to_email, subject, body):
     except Exception as e:
         print(f"Email error: {e}")
         return False
+    
+
+def download_flac_init(video_id: str, user_id: int) -> str:
+    """
+    Download song with metadata and thumbnail using yt-dlp.exe with fallback to yt-dlp module.
+    
+    Args:
+        video_id: str - The YouTube video ID
+        user_id: int - The ID of the user downloading the song
+        
+    Returns:
+        str: Path to the FLAC file if successful or existing, None if failed
+    """
+    try:
+        # Check for existing download
+        existing_path = get_download_info(video_id)
+        if existing_path:
+            if os.path.exists(existing_path):
+                logger.info(f"Using existing download for {video_id}")
+                load_local_songs()
+                return existing_path
+            else:
+                # Clean up DB if file is missing
+                load_local_songs()
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
+                conn.commit()
+                conn.close()
+
+        flac_path = os.path.join(MUSIC_DIR, f"{video_id}.flac")
+        
+        if os.path.exists(flac_path):
+            return flac_path
+
+        logger.info(f"Downloading new song: {video_id}")
+        yt_music_url = f"https://music.youtube.com/watch?v={video_id}"
+
+        # Try executable first
+        try:
+            return download_with_executable(video_id, user_id, yt_music_url, flac_path)
+        except Exception as exe_error:
+            logger.warning(f"Executable download failed, falling back to module: {str(exe_error)}")
+            return download_with_module(video_id, user_id, yt_music_url, flac_path)
+
+    except Exception as e:
+        logger.error(f"Error downloading song {video_id}: {str(e)}")
+        return None
+    
+def download_flac(video_id: str, user_id: int) -> str:
+    """
+    Download song with metadata and thumbnail using yt-dlp.exe with fallback to yt-dlp module.
+    
+    Args:
+        video_id: str - The YouTube video ID
+        user_id: int - The ID of the user downloading the song
+        
+    Returns:
+        str: Path to the FLAC file if successful or existing, None if failed
+    """
+    try:
+        # Check for existing download
+        existing_path = get_download_info(video_id)
+        if existing_path:
+            if os.path.exists(existing_path):
+                logger.info(f"Using existing download for {video_id}")
+                load_local_songs()
+                return existing_path
+            else:
+                # Clean up DB if file is missing
+                load_local_songs()
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
+                conn.commit()
+                conn.close()
+
+        flac_path = os.path.join(MUSIC_DIR, f"{video_id}.flac")
+        
+        if os.path.exists(flac_path):
+            return flac_path
+
+        logger.info(f"Downloading new song: {video_id}")
+        yt_music_url = f"https://music.youtube.com/watch?v={video_id}"
+
+        # Try executable first
+        try:
+            return download_with_executable(video_id, user_id, yt_music_url, flac_path)
+        except Exception as exe_error:
+            logger.warning(f"Executable download failed, falling back to module: {str(exe_error)}")
+            return download_with_module(video_id, user_id, yt_music_url, flac_path)
+
+    except Exception as e:
+        logger.error(f"Error downloading song {video_id}: {str(e)}")
+        return None
+
+def download_with_executable(video_id: str, user_id: int, url: str, flac_path: str) -> str:
+    """Helper function to download using yt-dlp executable"""
+    # Get metadata first
+    result = subprocess.run([
+        YTDLP_PATH,
+        "--quiet",
+        "--print", "%(title)s",
+        "--print", "%(artist)s",
+        "--print", "%(album)s",
+        url
+    ], capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        raise Exception(f"Metadata extraction failed: {result.stderr}")
+        
+    title, artist, album = result.stdout.strip().split("\n")
+
+    command = [
+        YTDLP_PATH,
+        "--quiet",
+        "--no-warnings",
+        "--extract-audio",
+        "--audio-format", "flac",
+        "--audio-quality", "0",
+        "--embed-thumbnail",
+        "--add-metadata",
+        "--parse-metadata", ":(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)",
+        "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
+    ]
+    
+    if platform.system() == "Windows":
+        command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
+    
+    command.append(url)
+    
+    download_result = subprocess.run(command)
+
+    if download_result.returncode == 0 and os.path.exists(flac_path):
+        record_download(video_id, title, artist, album, flac_path, user_id)
+        logger.info(f"Successfully downloaded {video_id} using executable")
+        load_local_songs()
+        return flac_path
+        
+    raise Exception(f"Executable download failed with code {download_result.returncode}")
+
+def download_with_module(video_id: str, user_id: int, url: str, flac_path: str) -> str:
+    """Helper function to download using yt-dlp Python module"""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'format': 'bestaudio',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'flac',
+            'preferredquality': '0',
+        }, {
+            'key': 'EmbedThumbnail',
+        }, {
+            'key': 'FFmpegMetadata',
+        }],
+        'outtmpl': os.path.join(MUSIC_DIR, '%(id)s.%(ext)s'),
+    }
+
+    if platform.system() == "Windows":
+        ydl_opts['ffmpeg_location'] = FFMPEG_BIN_DIR
+
+    with YoutubeDL(ydl_opts) as ydl:
+        # Extract metadata first
+        info = ydl.extract_info(url, download=False)
+        title = info.get('title', '')
+        artist = info.get('artist', '')
+        album = info.get('album', '')
+        
+        # Download the file
+        ydl.download([url])
+        
+        if os.path.exists(flac_path):
+            record_download(video_id, title, artist, album, flac_path, user_id)
+            logger.info(f"Successfully downloaded {video_id} using module")
+            load_local_songs()
+            return flac_path
+            
+        raise Exception("Module download failed - file not found")
