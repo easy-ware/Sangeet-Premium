@@ -1,8 +1,11 @@
 import os
 import platform
+import subprocess
+import sys
 import requests
 import stat
 from pathlib import Path
+from shutil import which
 
 def get_system_info():
     """
@@ -13,58 +16,85 @@ def get_system_info():
     system = platform.system().lower()
     machine = platform.machine().lower()
     is_64bit = platform.architecture()[0] == '64bit'
-    
-    # Handle Windows on ARM
-    if system == "windows" and "arm" in machine:
-        return "windows", "arm64" if is_64bit else "arm", is_64bit
-    
-    # Normalize architecture names
-    if machine in ['x86_64', 'amd64']:
-        machine = 'x86_64'
-    elif machine in ['i386', 'i686', 'x86']:
-        machine = 'i386'
-    elif machine in ['aarch64', 'arm64']:
-        machine = 'aarch64'
-    elif 'armv' in machine:
-        machine = 'armv7l' if machine >= 'armv7' else 'armv6l'
-        
     return system, machine, is_64bit
+
+def install_via_pip():
+    """
+    Install yt-dlp using pip and return the executable path.
+    Returns:
+        str: Path to the yt-dlp executable or None if installation fails
+    """
+    try:
+        # Check if pip is available
+        if not which('pip') and not which('pip3'):
+            return None
+            
+        print("Installing yt-dlp via pip...")
+        
+        # Try to upgrade pip first
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'], 
+                      check=True, capture_output=True)
+        
+        # Install/upgrade yt-dlp
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp'],
+                      check=True, capture_output=True)
+        
+        # Find the installed executable
+        yt_dlp_path = which('yt-dlp')
+        if not yt_dlp_path:
+            # On Windows, also check for .exe
+            yt_dlp_path = which('yt-dlp.exe')
+            
+        if yt_dlp_path:
+            print(f"Successfully installed yt-dlp via pip at: {yt_dlp_path}")
+            return yt_dlp_path
+            
+        return None
+    except subprocess.CalledProcessError as e:
+        print(f"Pip installation failed: {e}")
+        return None
+    except Exception as e:
+        print(f"Error during pip installation: {e}")
+        return None
 
 def setup_ytdlp():
     """
     Set up yt-dlp executable and return its path.
-    Creates system-specific subdirectories in res folder.
+    First tries pip installation, falls back to binary download if needed.
     Returns:
         str: Path to the yt-dlp executable
     """
     try:
         system, machine, is_64bit = get_system_info()
-        
         print(f"Detected system: {system}")
         print(f"Detected machine architecture: {machine}")
-        print(f"Is 64-bit: {is_64bit}")
         
-        # Updated mapping based on actual GitHub release files
+        # First, try to install via pip
+        pip_path = install_via_pip()
+        if pip_path:
+            return pip_path
+            
+        print("Pip installation not available or failed, falling back to binary download...")
+        
+        # Binary download patterns (fallback method)
         download_patterns = {
             "windows": {
                 "x86_64": "yt-dlp.exe",
                 "i386": "yt-dlp_x86.exe",
-                # Note: Windows ARM not available in current release
             },
             "darwin": {
                 "x86_64": "yt-dlp_macos",
-                "aarch64": "yt-dlp_macos",  # Same binary for both architectures
-                "legacy": "yt-dlp_macos_legacy"  # For older macOS versions
+                "aarch64": "yt-dlp_macos",
+                "legacy": "yt-dlp_macos_legacy"
             },
             "linux": {
                 "x86_64": "yt-dlp_linux",
                 "aarch64": "yt-dlp_linux_aarch64",
                 "armv7l": "yt-dlp_linux_armv7l",
-                "armv6l": "yt-dlp_linux_armv7l"  # Using armv7l for armv6l
+                "armv6l": "yt-dlp_linux_armv7l"
             }
         }
         
-        # Get the appropriate download pattern
         try:
             download_pattern = download_patterns[system][machine]
         except KeyError:
@@ -72,15 +102,14 @@ def setup_ytdlp():
             
         print(f"Selected download pattern: {download_pattern}")
         
-        # Create system-specific directory
+        # Create system-specific directory for binary method
         res_dir = Path('res') / system / machine
         res_dir.mkdir(parents=True, exist_ok=True)
         
-        # Set executable name
         executable = "yt-dlp.exe" if system == "windows" else "yt-dlp"
         executable_path = res_dir / executable
         
-        # Get latest release info with error handling
+        # Get latest release info
         try:
             api_url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
             response = requests.get(api_url, timeout=10)
@@ -105,7 +134,7 @@ def setup_ytdlp():
         
         print(f"\nDownloading from: {download_url}")
         
-        # Download executable with error handling
+        # Download executable
         try:
             response = requests.get(download_url, timeout=30)
             response.raise_for_status()
@@ -122,7 +151,6 @@ def setup_ytdlp():
                 raise Exception(f"Failed to set executable permissions: {e}")
             
         print(f"Successfully installed to: {executable_path}")
-        
         return str(executable_path)
     
     except Exception as e:
