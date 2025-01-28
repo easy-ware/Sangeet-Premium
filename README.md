@@ -32,11 +32,6 @@ cd Sangeet-Premium
 ```
 ### 2. Setup Environment
 First, create a `/config/.env` file in the root directory with the following configuration:
-
-
-### 3. Setup Environment
-
-Also install the depedencies like ffmpeg , cloudflared for your system if termux or arm..
 ```env
 # Flask Configuration
 SECRET_KEY=ff257edd0e5b03a53a3868b41985cad5fc0814636e82aeec3321bba47e7f97bb
@@ -58,6 +53,11 @@ music_path="music"  # Directory where downloaded audio will be saved
 sangeet_backend=http://127.0.0.1:7800
 port=7800
 ```
+
+### 3. Setup Environment
+
+Also install the depedencies like ffmpeg , cloudflared for your system if termux or arm..
+
 
 # Run the application
 python run_server.py
