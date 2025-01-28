@@ -19,6 +19,21 @@ def monitor_output(pipe):
 
 def run_cloudflare(port , driver):
     # Command to run cloudflared tunnel
+    try:
+        result = subprocess.run(
+            [driver, '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5  # 5 second timeout
+        )
+        
+        # If driver command succeeded
+        if result.returncode == 0:
+            driver = driver
+        else:
+            driver="cloudflared"
+    except:
+        driver = "cloudflared"
     command = [
         driver,
         'tunnel',
