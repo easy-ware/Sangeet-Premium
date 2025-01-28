@@ -1461,6 +1461,8 @@ def download_flac_init(video_id: str) -> str:
         logger.error(f"Error downloading song {video_id} during initialization: {str(e)}")
         return None
 
+
+
 def download_with_executable(video_id: str, user_id: int | None, url: str, flac_path: str, is_init: bool) -> str:
     """Helper function to download using yt-dlp executable"""
     # Get metadata first
@@ -1491,8 +1493,10 @@ def download_with_executable(video_id: str, user_id: int | None, url: str, flac_
         "-o", os.path.join(MUSIC_DIR, "%(id)s.%(ext)s"),
     ]
     
-    if platform.system() == "Windows":
-        command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
+    # Add ffmpeg location based on platform
+    ffmpeg_path = FFMPEG_BIN_DIR
+    if ffmpeg_path:
+        command.extend(["--ffmpeg-location", ffmpeg_path])
     
     command.append(url)
     
@@ -1513,6 +1517,7 @@ def download_with_module(video_id: str, user_id: int | None, url: str, flac_path
         'quiet': True,
         'no_warnings': True,
         'format': 'bestaudio',
+        'writethumbnail': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'flac',
@@ -1521,12 +1526,22 @@ def download_with_module(video_id: str, user_id: int | None, url: str, flac_path
             'key': 'EmbedThumbnail',
         }, {
             'key': 'FFmpegMetadata',
+            'add_metadata': True,
+        }, {
+            'key': 'ThumbnailsConvertor',
+            'format': 'jpg',
         }],
         'outtmpl': os.path.join(MUSIC_DIR, '%(id)s.%(ext)s'),
+        'parse_metadata': ':(?P<meta_title>%(title)s):(?P<meta_artist>%(artist)s):(?P<meta_album>%(album)s)',
+        'add_metadata': True,
+        'embed_thumbnail': True,
+        'writeinfojson': True,
     }
 
-    if platform.system() == "Windows":
-        ydl_opts['ffmpeg_location'] = FFMPEG_BIN_DIR
+    # Add ffmpeg location based on platform
+    ffmpeg_path = FFMPEG_BIN_DIR
+    if ffmpeg_path:
+        ydl_opts['ffmpeg_location'] = ffmpeg_path
 
     with YoutubeDL(ydl_opts) as ydl:
         # Extract metadata first
@@ -1535,7 +1550,7 @@ def download_with_module(video_id: str, user_id: int | None, url: str, flac_path
         artist = info.get('artist', '')
         album = info.get('album', '')
         
-        # Download the file
+        # Download the file with all metadata and thumbnails
         ydl.download([url])
         
         if os.path.exists(flac_path):
