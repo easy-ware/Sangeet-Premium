@@ -22,7 +22,15 @@ Sangeet Premium solves these issues by providing:
 
 ## 🚀 Quick Start Guide
 
-### 1. Setup Environment
+
+
+### 1. Installation Steps
+```bash
+# Clone the repository
+git clone https://github.com/easy-ware/Sangeet-Premium.git
+cd Sangeet-Premium
+```
+### 2. Setup Environment
 First, create a `/config/.env` file in the root directory with the following configuration:
 
 ```env
@@ -46,13 +54,6 @@ music_path="music"  # Directory where downloaded audio will be saved
 sangeet_backend=http://127.0.0.1:7800
 port=7800
 ```
-
-### 2. Installation Steps
-```bash
-# Clone the repository
-git clone https://github.com/easy-ware/Sangeet-Premium.git
-cd Sangeet-Premium
-
 
 # Run the application
 python run_server.py
