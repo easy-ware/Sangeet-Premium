@@ -65,7 +65,13 @@ python run_server.py
 # or
 python3 run_server.py
 ```
-
+# If got issues then simply
+```
+pip install -r requirements/req.txt
+python sangeet_server.py
+# or
+python3 sangeet_server.py
+```
 ## ✨ Features
 - **Stunning UI/UX**: Modern, intuitive interface with smooth animations
 - **Smart Recommendations**: AI-powered music suggestions based on your taste
