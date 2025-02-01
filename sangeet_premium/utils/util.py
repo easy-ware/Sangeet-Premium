@@ -770,7 +770,6 @@ def get_recent_plays(limit=10):
 
 
 
-
 def filter_local_songs(query: str):
     """Return deduplicated local songs with title/artist matching the query."""
     qlow = query.lower()
@@ -837,8 +836,6 @@ def search_songs(query: str):
     except Exception as e:
         logger.error(f"search_songs error: {e}")
         return []
-    
-
 
 def fallback_recommendations():
     """Simplified fallback using search instead of unavailable methods."""
@@ -872,6 +869,7 @@ def fallback_recommendations():
     except Exception as e:
         logger.error(f"Fallback recommendations error: {e}")
         return jsonify([])
+
 
 def get_local_song_recommendations(local_song_id):
     """Get recommendations for local songs using title/artist search."""
@@ -962,8 +960,6 @@ def add_recommendation(track, recommendations, seen_songs, current_song_id=None)
     except Exception as e:
         logger.warning(f"Error processing track: {e}")
         return False
-    
-
 def cleanup_expired_sessions():
     """Remove expired sessions from database"""
     conn = sqlite3.connect(DB_PATH)
