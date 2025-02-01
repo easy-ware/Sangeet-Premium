@@ -54,9 +54,18 @@ sangeet_backend=http://127.0.0.1:7800
 port=7800
 ```
 
-### 3. Setup Environment
 
-Also install the depedencies like ffmpeg , cloudflared for your system if termux or arm..
+
+### 3. Installation Steps
+## Make sure to install cloudflared , ffmpeg on linux and other versions distros...
+## Also add paths to environment variables.....
+```bash
+#via apt
+sudo apt install ffmpeg
+#cloudflared
+wget "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"
+sudo dpkg -i cloudflared-linux-amd64.deb
+```
 
 
 # Run the application
