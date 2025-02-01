@@ -7,6 +7,24 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="icon" type="image/gif" href="/data/download/icons/sangeet-home" sizes="any">
   <link href="/design/index" rel="stylesheet">
+  <style id="version-info">
+    @keyframes float {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-20px) rotate(10deg); }
+    }
+    
+    @keyframes twinkle {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+    
+    .music-note {
+      position: absolute;
+      font-size: 24px;
+      pointer-events: none;
+      animation: float 3s infinite, twinkle 3s infinite;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
