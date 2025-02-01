@@ -56,7 +56,7 @@ port=7800
 
 
 
-### 3. Installation Steps
+### 3. Post b Installation Steps (optional)
 ## Make sure to install cloudflared , ffmpeg on linux and other versions distros...
 ## Also add paths to environment variables.....
 ```bash
