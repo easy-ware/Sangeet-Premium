@@ -6,6 +6,7 @@ from ..utils import util
 import random
 import time
 import json
+from urllib.parse import urlparse, parse_qs
 from functools import wraps
 from urllib.parse import urlparse
 import secrets
@@ -452,85 +453,187 @@ def get_artist_info(artist_name):
             'links': {}
         })
     
+from concurrent.futures import ThreadPoolExecutor
+import yt_dlp
+from functools import partial
+import asyncio
 
+# First add this helper function to extract playlist info
+def extract_playlist_info(url, max_workers=4):
+    """Extract playlist information using yt-dlp"""
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'force_generic_extractor': False
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info and 'entries' in info:
+                # Process entries in parallel
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Create a partial function with ydl options
+                    extract_func = partial(extract_video_info, ydl_opts=ydl_opts)
+                    # Map the extraction function over all video URLs
+                    video_urls = [entry['url'] if 'url' in entry else f"https://youtube.com/watch?v={entry['id']}" 
+                                for entry in info['entries'] if entry]
+                    results = list(executor.map(extract_func, video_urls))
+                    return [r for r in results if r]  # Filter out None results
+            return []
+    except Exception as e:
+        logger.error(f"Error extracting playlist info: {e}")
+        return []
+
+def extract_video_info(url, ydl_opts):
+    """Extract single video information"""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info:
+                return {
+                    "id": info.get('id', ''),
+                    "title": info.get('title', 'Unknown'),
+                    "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
+                    "album": info.get('album', ''),
+                    "duration": int(info.get('duration', 0)),
+                    "thumbnail": get_best_thumbnail(info.get('thumbnails', [])),
+                }
+    except Exception as e:
+        logger.error(f"Error extracting video info: {e}")
+    return None
+
+def get_best_thumbnail(thumbnails):
+    """Get the best quality thumbnail URL"""
+    if not thumbnails:
+        return ""
+    # Sort by resolution if available
+    sorted_thumbs = sorted(thumbnails, 
+                         key=lambda x: x.get('height', 0) * x.get('width', 0),
+                         reverse=True)
+    return sorted_thumbs[0].get('url', '')
 @bp.route("/api/search")
 @login_required
 def api_search():
     """
     Enhanced search endpoint that handles:
     - Regular text search
-    - YouTube/YouTube Music URLs
+    - YouTube/YouTube Music URLs (songs, playlists, albums)
     - Video IDs
     """
     q = request.args.get("q", "").strip()
     page = int(request.args.get("page", 0))
     limit = int(request.args.get("limit", 20))
 
-    # Check if input is a YouTube/YouTube Music URL
-    video_id = util.extract_video_id(q)
-    
-    # If it looks like a direct video ID
-    if not video_id and re.match(r'^[a-zA-Z0-9_-]{11}$', q):
-        video_id = q
-
-    # If we have a video ID, return that specific result
-    if video_id:
+    # Process if input is a link
+    if "youtube.com" in q or "youtu.be" in q:
         try:
-            # Try to get song info
-            info = ytmusic.get_song(video_id)
-            if info:
-                vd = info.get("videoDetails", {})
-                result = [{
-                    "id": video_id,
-                    "title": vd.get("title", "Unknown"),
-                    "artist": vd.get("author", "Unknown Artist"),
-                    "album": "",
-                    "duration": int(vd.get("lengthSeconds", 0)),
-                    "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-                }]
-                return jsonify(result)
+            # First try to handle as playlist
+            if "playlist" in q or "list=" in q:
+                ydl_opts = {
+                    'quiet': True,
+                    'extract_flat': True,
+                    'force_generic_extractor': False
+                }
                 
-            # If not found in music, try regular YouTube search
-            results = ytmusic.search(video_id)
-            if results:
-                # Filter and format results
-                valid_results = []
-                seen_ids = set()
-                
-                for item in results:
-                    vid = item.get("videoId")
-                    if not vid or vid in seen_ids:
-                        continue
-                    
-                    artist = "Unknown Artist"
-                    if item.get("artists"):
-                        artist = item["artists"][0].get("name", "Unknown Artist")
-                    
-                    valid_results.append({
-                        "id": vid,
-                        "title": item.get("title", "Unknown"),
-                        "artist": artist,
-                        "album": "",
-                        "duration": item.get("duration_seconds", 0),
-                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-                    })
-                    seen_ids.add(vid)
-                    
-                    if len(valid_results) >= limit:
-                        break
-                
-                return jsonify(valid_results)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(q, download=False)
+                    if info and 'entries' in info:
+                        results = []
+                        seen_ids = set()
+                        
+                        # Process entries
+                        for entry in info['entries']:
+                            if not entry:
+                                continue
+                                
+                            video_id = entry.get('id')
+                            if not video_id or video_id in seen_ids:
+                                continue
+
+                            # Extract basic info from entry
+                            result = {
+                                "id": video_id,
+                                "title": entry.get('title', 'Unknown'),
+                                "artist": entry.get('artist', entry.get('uploader', 'Unknown Artist')),
+                                "album": entry.get('album', ''),
+                                "duration": int(entry.get('duration', 0)),
+                                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                            }
+                            
+                            results.append(result)
+                            seen_ids.add(video_id)
+                            
+                            if len(results) >= limit:
+                                break
+                        
+                        start = page * limit
+                        end = start + limit
+                        return jsonify(results[start:end])
+
+            # If not a playlist, try as single video/song
+            parsed = urlparse(q)
+            params = parse_qs(parsed.query)
             
-            # If nothing found, return empty results
-            return jsonify([])
-            
+            video_id = None
+            if "youtu.be" in q:
+                video_id = q.split("/")[-1].split("?")[0]
+            elif "v" in params:
+                video_id = params["v"][0]
+                
+            if video_id:
+                ydl_opts = {
+                    'quiet': True,
+                    'extract_flat': False,
+                    'force_generic_extractor': False
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(f"https://youtube.com/watch?v={video_id}", download=False)
+                    if info:
+                        result = [{
+                            "id": video_id,
+                            "title": info.get('title', 'Unknown'),
+                            "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
+                            "album": info.get('album', ''),
+                            "duration": int(info.get('duration', 0)),
+                            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                        }]
+                        return jsonify(result)
+                        
         except Exception as e:
-            logger.error(f"Error processing video ID {video_id}: {e}")
+            logger.error(f"Error processing link {q}: {e}")
+            # Fall through to regular search if link processing fails
+
+    # Check if input is a direct video ID
+    if re.match(r'^[a-zA-Z0-9_-]{11}$', q):
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'extract_flat': False,
+                'force_generic_extractor': False
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://youtube.com/watch?v={q}", download=False)
+                if info:
+                    result = [{
+                        "id": q,
+                        "title": info.get('title', 'Unknown'),
+                        "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
+                        "album": info.get('album', ''),
+                        "duration": int(info.get('duration', 0)),
+                        "thumbnail": f"https://i.ytimg.com/vi/{q}/hqdefault.jpg"
+                    }]
+                    return jsonify(result)
+                    
+        except Exception as e:
+            logger.error(f"Error processing video ID {q}: {e}")
             return jsonify([])
 
     # If not a YouTube URL/ID, proceed with regular search
     if not q:
-        # Original empty query logic
+        # Empty query logic
         cats = ["pop", "rock", "hip hop"]
         combined = []
         seen_ids = set()
@@ -567,12 +670,50 @@ def api_search():
             combined_res.append(song)
             seen_ids.add(song["id"])
     
-    # Add YouTube results
-    yt_res = util.search_songs(q)
-    for song in yt_res:
-        if song["id"] not in seen_ids:
-            combined_res.append(song)
-            seen_ids.add(song["id"])
+    # Add YouTube results using yt-dlp
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'force_generic_extractor': False
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Search YouTube
+            info = ydl.extract_info(f"ytsearch{limit}:{q}", download=False)
+            
+            if info and 'entries' in info:
+                for entry in info['entries']:
+                    if not entry:
+                        continue
+                        
+                    video_id = entry.get('id')
+                    if not video_id or video_id in seen_ids:
+                        continue
+
+                    result = {
+                        "id": video_id,
+                        "title": entry.get('title', 'Unknown'),
+                        "artist": entry.get('artist', entry.get('uploader', 'Unknown Artist')),
+                        "album": entry.get('album', ''),
+                        "duration": int(entry.get('duration', 0)),
+                        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                    }
+                    
+                    combined_res.append(result)
+                    seen_ids.add(video_id)
+                    
+                    if len(combined_res) >= limit:
+                        break
+                        
+    except Exception as e:
+        logger.error(f"Error in YouTube search: {e}")
+        # Fall back to original search method
+        yt_res = util.search_songs(q)
+        for song in yt_res:
+            if song["id"] not in seen_ids:
+                combined_res.append(song)
+                seen_ids.add(song["id"])
     
     start = page * limit
     end = start + limit
