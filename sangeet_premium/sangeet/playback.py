@@ -454,17 +454,14 @@ def get_artist_info(artist_name):
     
 
 @bp.route("/api/search")
+@login_required
 def api_search():
     """
     Enhanced search endpoint that handles:
     - Regular text search
     - YouTube/YouTube Music URLs
     - Video IDs
-    - Local songs with automatic refresh
     """
-    # Always refresh local songs first
-    load_local_songs_from_file()
-    
     q = request.args.get("q", "").strip()
     page = int(request.args.get("page", 0))
     limit = int(request.args.get("limit", 20))
@@ -479,12 +476,7 @@ def api_search():
     # If we have a video ID, return that specific result
     if video_id:
         try:
-            # First check if it's a local song
-            local_id = f"local-{video_id}"
-            if local_id in local_songs:
-                return jsonify([local_songs[local_id]])
-                
-            # Try to get song info from YouTube
+            # Try to get song info
             info = ytmusic.get_song(video_id)
             if info:
                 vd = info.get("videoDetails", {})
@@ -538,7 +530,7 @@ def api_search():
 
     # If not a YouTube URL/ID, proceed with regular search
     if not q:
-        # Original empty query logic with refreshed local songs
+        # Original empty query logic
         cats = ["pop", "rock", "hip hop"]
         combined = []
         seen_ids = set()
@@ -568,12 +560,10 @@ def api_search():
     seen_ids = set()
     combined_res = []
     
-    # Add local results first with direct search in refreshed local songs
-    for song in local_songs.values():
-        if (q.lower() in song["title"].lower() or 
-            q.lower() in song["artist"].lower() or 
-            q.lower() in song.get("album", "").lower()) and \
-           song["id"] not in seen_ids:
+    # Add local results first
+    local_res = util.filter_local_songs(q)
+    for song in local_res:
+        if song["id"] not in seen_ids:
             combined_res.append(song)
             seen_ids.add(song["id"])
     
