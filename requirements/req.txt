@@ -12,3 +12,5 @@ pyfiglet
 gunicorn
 tqdm
 termcolor
+pywin32==308
+winshell==0.6
