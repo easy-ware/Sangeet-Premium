@@ -28,6 +28,15 @@ def create_shortcut(batch_path, icon_path=None):
     return shortcut_path
 
 def main(exe_path , ico_path):
+    with open(os.path.join(os.getcwd() , "sangeet.bat") , "w") as ms:
+        data = f'''
+@echo off
+:: Replace with your sangeet dir where cloned
+cd "{os.getcwd()}" 
+python run_server.py
+pause
+'''
+        ms.write(data)
     try:
         shortcut_path = create_shortcut(exe_path, ico_path)
         print(f"Shortcut created successfully at: {shortcut_path}")
