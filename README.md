@@ -81,6 +81,10 @@ python sangeet_server.py
 # or
 python3 sangeet_server.py
 ```
+##Warn
+```
+Make sure to get or pull from latest branch
+```
 ## ✨ Features
 - **Stunning UI/UX**: Modern, intuitive interface with smooth animations
 - **Smart Recommendations**: AI-powered music suggestions based on your taste
