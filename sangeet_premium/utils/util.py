@@ -147,7 +147,7 @@ def setup_ytdlp():
 YTDLP_PATH , version_path = setup_ytdlp()
 MUSIC_DIR = os.getenv("music_path")
 
-FFMPEG_BIN_DIR = os.path.join(os.getcwd(), "res", "ffmpeg", "bin")  # Path to ffmpeg binary
+FFMPEG_BIN_DIR = os.path.join(os.getcwd(), "ffmpeg", "bin")  # Path to ffmpeg binary
 
 song_cache = {}
 
@@ -1487,7 +1487,7 @@ def download_with_executable(video_id: str, user_id: int | None, url: str, flac_
     ]
     
     # Only add ffmpeg path on Windows
-    if platform.system() == "Windows":
+    if platform.system().lower() == "windows":
         command.extend(["--ffmpeg-location", FFMPEG_BIN_DIR])
     
     command.append(url)
