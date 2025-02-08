@@ -1,6 +1,7 @@
 from flask import Flask , request
 from sangeet_premium.sangeet import playback
 from sangeet_premium.utils import getffmpeg
+from sangeet_premium.utils import starter
 import sys
 from threading import Thread
 import logging
@@ -52,6 +53,7 @@ def start_local_songs_refresh(app):
             try:
                 # Create a new application context for each iteration
                 with app.app_context():
+                    util.load_local_songs()
                     playback.load_local_songs_from_file()
             except Exception as e:
                 logger.error(f"Error refreshing local songs: {e}")
@@ -86,6 +88,8 @@ if __name__ == '__main__':
     playback.load_local_songs_from_file()
     util.download_default_songs()
     init_app(app)
+    if sys.platform.startswith('win'):
+       starter.main(os.path.join(os.getcwd() , "sangeet.bat") , os.path.join(os.getcwd() , "assets" , "sangeet_logo" , "logo.ico"))
 
 
     # Calculate optimal workers
