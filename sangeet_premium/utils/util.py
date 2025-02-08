@@ -369,30 +369,104 @@ def get_play_history(user_id, limit=50):
     
 local_songs = {}
 
+from mutagen import File
+from mutagen.flac import FLAC
+
+
+
+# You should define LOCAL_SONGS_PATHS (semicolon-separated list of directories)
+# For example:
+# LOCAL_SONGS_PATHS = "/path/to/music;/another/path"
+LOCAL_SONGS_PATHS = os.getenv("LOCAL_SONGS_PATHS")
+
+def init_db_local():
+    """
+    Initialize (or create if needed) the SQLite database.
+    The database file is stored in a subfolder called "locals".
+    """
+    db_dir = os.path.join(os.getcwd(), "database_files")
+    if not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+    db_path = os.path.join(db_dir, "local_songs.db")
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    # Create the table if it doesn’t exist.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS songs (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            path TEXT UNIQUE,
+            thumbnail TEXT,
+            duration INTEGER
+        )
+    ''')
+    conn.commit()
+    return conn
+
+def get_new_local_id(cursor):
+    """
+    Look through the current song IDs (which are of the form "local-<number>")
+    and generate a new one with an incremented number.
+    """
+    cursor.execute("SELECT id FROM songs")
+    rows = cursor.fetchall()
+    max_num = 0
+    for (song_id,) in rows:
+        if song_id.startswith("local-"):
+            try:
+                num = int(song_id.split("-")[1])
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                # In case the format is not as expected, ignore it.
+                pass
+    return "local-" + str(max_num + 1)
+
 def load_local_songs():
-    """Scan local directories for music files and extract metadata."""
+    """Scan local directories for music files, update/read the database,
+    and then dump the current list of songs to a JSON file."""
     if not LOCAL_SONGS_PATHS:
-        return
+        return {}
+
+    # Split the directories and log what we’re scanning.
     dirs = [d.strip() for d in LOCAL_SONGS_PATHS.split(";") if d.strip()]
     logger.info(f"Loading local songs from: {dirs}")
 
+    # Set of file extensions to consider.
     file_exts = {".mp3", ".flac", ".m4a", ".wav", ".ogg", ".wma", ".aac", ".aiff", ".alac"}
-    counter = 0
 
+    # Open (or create) the SQLite database.
+    conn = init_db_local()
+    cursor = conn.cursor()
+
+    # Walk through each provided directory.
     for d in dirs:
         if not os.path.isdir(d):
             logger.warning(f"Local path is not a directory: {d}")
             continue
+
         for root, _, files in os.walk(d):
             for fname in files:
                 _, ext = os.path.splitext(fname)
                 if ext.lower() not in file_exts:
                     continue
                 full_path = os.path.join(root, fname)
-                counter += 1
-                local_id = f"local-{counter}"
 
-                # Default metadata
+                # (Extra check: if the file does not exist, skip it.)
+                if not os.path.exists(full_path):
+                    continue
+
+                # See if this song file is already in the database.
+                cursor.execute("SELECT id FROM songs WHERE path = ?", (full_path,))
+                result = cursor.fetchone()
+                if result:
+                    local_id = result[0]
+                else:
+                    local_id = get_new_local_id(cursor)
+
+                # Default metadata values.
                 title = fname
                 artist = "Unknown Artist"
                 album = "Unknown Album"
@@ -400,55 +474,77 @@ def load_local_songs():
                 thumbnail = ""
 
                 try:
-                    # Read audio file
+                    # Read the audio file using Mutagen.
                     audio = File(full_path, easy=True)
                     if audio and hasattr(audio, "info") and hasattr(audio.info, "length"):
                         duration = int(audio.info.length)
-
-                    # Extract common metadata
                     if audio:
                         title = audio.get("title", [fname])[0]
                         artist = audio.get("artist", ["Unknown Artist"])[0]
                         album = audio.get("album", ["Unknown Album"])[0]
 
-                    # Handle specific formats for additional data
+                    # Try to extract a picture (works for FLAC and ID3-based files)
                     if isinstance(audio, FLAC) or hasattr(audio, "pictures"):
                         pictures = getattr(audio, "pictures", [])
                         if pictures:
                             pic = pictures[0]
                             thumbnail = f"data:{pic.mime};base64,{base64.b64encode(pic.data).decode()}"
                     elif hasattr(audio, "tags"):
-                        # ID3 tags for MP3 and similar formats
                         tags = audio.tags
-                        if "APIC:" in tags:  # Attached picture (ID3)
+                        if "APIC:" in tags:  # Attached picture for ID3 tags.
                             pic = tags["APIC:"]
                             thumbnail = f"data:{pic.mime};base64,{base64.b64encode(pic.data).decode()}"
-
                 except Exception as e:
                     logger.error(f"Error reading metadata from {fname}: {e}")
 
-                # Add song to dictionary
-                local_songs[local_id] = {
-                    "id": local_id,
-                    "title": title,
-                    "artist": artist,
-                    "album": album,
-                    "path": full_path,
-                    "thumbnail": thumbnail,
-                    "duration": duration,
-                }
+                # Insert (or update) the song’s record in the database.
+                try:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO songs (id, title, artist, album, path, thumbnail, duration)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (local_id, title, artist, album, full_path, thumbnail, duration))
+                    conn.commit()
+                except Exception as e:
+                    logger.error(f"Error inserting/updating database for {full_path}: {e}")
 
-    logger.info(f"Loaded {len(local_songs)} local songs with metadata.")
+    # After scanning the directories, load all songs from the database.
+    cursor.execute("SELECT id, title, artist, album, path, thumbnail, duration FROM songs")
+    rows = cursor.fetchall()
+    local_songs = {}
+    for row in rows:
+        song_id, title, artist, album, path, thumbnail, duration = row
+        # Only add songs for which the file still exists.
+        if os.path.exists(path):
+            local_songs[song_id] = {
+                "id": song_id,
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "path": path,
+                "thumbnail": thumbnail,
+                "duration": duration,
+            }
+        else:
+            # Optionally, remove songs from the DB if the file no longer exists.
+            cursor.execute("DELETE FROM songs WHERE id = ?", (song_id,))
+            conn.commit()
 
-    # Save local_songs to a JSON file
+    # Save the collected song metadata to a JSON file.
     try:
-        with open(os.path.join(os.getcwd() , "locals" , "local.json"), "w", encoding="utf-8") as json_file:
+        json_dir = os.path.join(os.getcwd(), "locals")
+        if not os.path.exists(json_dir):
+            os.makedirs(json_dir)
+        json_path = os.path.join(json_dir, "local.json")
+        with open(json_path, "w", encoding="utf-8") as json_file:
             json.dump(local_songs, json_file, ensure_ascii=False, indent=4)
-        logger.info("Local songs saved to local_songs.json.")
+        logger.info(f"Local songs saved to {json_path}.")
     except Exception as e:
         logger.error(f"Error saving local songs to JSON file: {e}")
 
+    conn.close()
+    logger.info(f"Loaded {len(local_songs)} local songs with metadata.")
     return local_songs
+
 
 def get_song_info(song_id):
     """Get song metadata with error handling."""
