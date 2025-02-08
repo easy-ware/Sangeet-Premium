@@ -87,7 +87,7 @@ Make sure to get or pull from latest branch
 ```
 ## ✨ Features
 - **Stunning UI/UX**: Modern, intuitive interface with smooth animations
-- **Smart Recommendations**: AI-powered music suggestions based on your taste
+- **Smart Recommendations**: Smart powered music suggestions based on your taste
 - **High-Quality Audio**: Crystal clear audio streaming with no compromises
 - **Library Management**: Organize your music collection effortlessly
 - **Cross-Platform**: Available on Windows, macOS, and Linux
