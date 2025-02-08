@@ -696,13 +696,14 @@ def api_search():
 
     # --- Run both search methods concurrently ---
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_yt = executor.submit(search_ytdlp)
+        # Submit YTMusic search first so its results appear first.
         future_utmusic = executor.submit(util.search_songs, q)
-        yt_results = future_yt.result()
+        future_yt = executor.submit(search_ytdlp)
         utmusic_results = future_utmusic.result()
+        yt_results = future_yt.result()
 
-    # Merge the results from yt-dlp and YTMusic, removing duplicates.
-    for song in (yt_results + utmusic_results):
+    # Merge the results with YTMusic results first, then append yt-dlp results.
+    for song in (utmusic_results + yt_results):
         if song["id"] not in seen_ids:
             combined_res.append(song)
             seen_ids.add(song["id"])
@@ -710,6 +711,7 @@ def api_search():
     start = page * limit
     end = start + limit
     return jsonify(combined_res[start:end])
+
 @bp.route("/api/song-info/<song_id>")
 @login_required
 def api_song_info(song_id):
