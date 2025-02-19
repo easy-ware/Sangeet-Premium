@@ -25,7 +25,7 @@ def install_colorama():
         except Exception as e:
             print(f"Unexpected error during installation: {e}")
             return False
-
+install_colorama()
 from sangeet_premium.utils import venv_create
 
 venv_create.create_env("sangeet-premium-venv" , os.path.join(os.getcwd() , "requirements" , "req.txt"), os.path.join(os.getcwd() , "logs" , "venve-logs") , os.path.join(os.getcwd() , "sangeet_server.py"))
