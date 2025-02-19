@@ -26,6 +26,35 @@ def install_colorama():
             print(f"Unexpected error during installation: {e}")
             return False
 install_colorama()
+dependencies = [
+    "Flask",
+    "colorama",
+    "python-dotenv",
+    "ytmusicapi",
+    "ntplib",
+    "pytz",
+    "yt-dlp",
+    "bcrypt",
+    "mutagen",
+    "requests",
+    "pyfiglet",
+    "gunicorn",
+    "tqdm",
+    "termcolor"
+]
+
+
+if sys.platform.startswith("win"):
+    dependencies.extend([
+        "pywin32==308",
+        "winshell==0.6"
+    ])
+
+with open(os.path.join(os.getcwd() , "requirements" , "req.txt"), "w") as f:
+    f.write("\n".join(dependencies))
+
+
+
 from sangeet_premium.utils import venv_create
 
 venv_create.create_env("sangeet-premium-venv" , os.path.join(os.getcwd() , "requirements" , "req.txt"), os.path.join(os.getcwd() , "logs" , "venve-logs") , os.path.join(os.getcwd() , "sangeet_server.py"))
