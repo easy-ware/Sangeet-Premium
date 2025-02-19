@@ -1,8 +1,10 @@
 from flask import Flask , request
 from sangeet_premium.sangeet import playback
 from sangeet_premium.utils import getffmpeg
-from sangeet_premium.utils import starter
 import sys
+if sys.platform.startswith('win'):
+   from sangeet_premium.utils import starter
+
 from threading import Thread
 import logging
 import multiprocessing
