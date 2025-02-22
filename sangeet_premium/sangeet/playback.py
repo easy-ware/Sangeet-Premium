@@ -57,53 +57,92 @@ def login_required(f):
             
         return f(*args, **kwargs)
     return decorated_function
-def load_local_songs_from_file():
-    """Load songs from a JSON file and append them to the local_songs dictionary."""
-    global local_songs  # Make sure we're modifying the global dictionary
+# def load_local_songs_from_file():
+#     """Load songs from a JSON file and append them to the local_songs dictionary."""
+#     global local_songs  # Make sure we're modifying the global dictionary
     
+#     # Generate the file path
+#     json_file_path = os.path.join(os.getcwd(), "locals", "local.json")
+    
+#     # Check if the file exists
+#     if not os.path.isfile(json_file_path):
+#         print(f"JSON file not found at: {json_file_path}")
+#         return
+    
+#     try:
+#         # Read the JSON file
+#         with open(json_file_path, "r", encoding="utf-8") as file:
+#             data = json.load(file)
+        
+#         # Clear existing local songs to prevent duplicates
+#         local_songs.clear()
+        
+#         # Validate and append the data
+#         if isinstance(data, dict):
+#             for key, song in data.items():
+#                 if isinstance(song, dict) and {"id", "title", "artist", "album", "path", "thumbnail", "duration"}.issubset(song.keys()):
+#                     # Verify file exists before adding
+#                     if os.path.exists(song["path"]):
+#                         local_songs[key] = song
+#                     else:
+#                         print(f"Skipped missing file for key: {key}")
+#                 else:
+#                     print(f"Skipped invalid song format for key: {key}")
+                    
+#             print(f"Loaded {len(data)} songs from {json_file_path}.")
+            
+#             # Update search cache to include local songs
+#             if "" in search_cache:
+#                 # Get the timestamp from cache
+#                 _, timestamp = search_cache[""]
+#                 # Update cache with new local songs included
+#                 search_cache[""] = (list(local_songs.values()), timestamp)
+#         else:
+#             print("Invalid JSON structure. Expected a dictionary.")
+#     except Exception as e:
+#         print(f"Error reading JSON file: {e}")
+
+#     return local_songs
+
+def load_local_songs_from_file():
+    """Load songs from a JSON file and return a dictionary of local songs."""
+    import os
+    import json
+
     # Generate the file path
     json_file_path = os.path.join(os.getcwd(), "locals", "local.json")
     
-    # Check if the file exists
+    # Check if the file exists; if not, return an empty dictionary
     if not os.path.isfile(json_file_path):
         print(f"JSON file not found at: {json_file_path}")
-        return
+        return {}
     
     try:
         # Read the JSON file
         with open(json_file_path, "r", encoding="utf-8") as file:
             data = json.load(file)
         
-        # Clear existing local songs to prevent duplicates
-        local_songs.clear()
-        
-        # Validate and append the data
+        local_songs = {}
+        # Validate and add each song entry
         if isinstance(data, dict):
+            required_keys = {"id", "title", "artist", "album", "path", "thumbnail", "duration"}
             for key, song in data.items():
-                if isinstance(song, dict) and {"id", "title", "artist", "album", "path", "thumbnail", "duration"}.issubset(song.keys()):
-                    # Verify file exists before adding
+                if isinstance(song, dict) and required_keys.issubset(song.keys()):
+                    # Verify the song file exists before adding it
                     if os.path.exists(song["path"]):
                         local_songs[key] = song
                     else:
                         print(f"Skipped missing file for key: {key}")
                 else:
                     print(f"Skipped invalid song format for key: {key}")
-                    
-            print(f"Loaded {len(data)} songs from {json_file_path}.")
-            
-            # Update search cache to include local songs
-            if "" in search_cache:
-                # Get the timestamp from cache
-                _, timestamp = search_cache[""]
-                # Update cache with new local songs included
-                search_cache[""] = (list(local_songs.values()), timestamp)
+            print(f"Loaded {len(local_songs)} songs from {json_file_path}.")
         else:
             print("Invalid JSON structure. Expected a dictionary.")
+        
+        return local_songs
     except Exception as e:
         print(f"Error reading JSON file: {e}")
-
-    return local_songs
-
+        return {}
 
 CACHE_DURATION = 3600
 search_cache = {}
@@ -123,6 +162,7 @@ def home():
 @login_required
 def api_play_sequence(song_id, action):
     """Enhanced previous/next handling with proper sequence tracking."""
+    local_songs = load_local_songs_from_file()
     try:
         # Get current song's session and sequence info
         with sqlite3.connect(DB_PATH) as conn:
@@ -527,6 +567,7 @@ def api_search():
       - YTMusic (via util.search_songs)
     and merges the results, removing duplicates.
     """
+    local_songs = load_local_songs_from_file()
     q = request.args.get("q", "").strip()
     page = int(request.args.get("page", 0))
     limit = int(request.args.get("limit", 20))
@@ -1772,6 +1813,7 @@ def api_queue():
 @login_required
 def api_stats():
     """Return user-specific usage stats."""
+    local_songs = load_local_songs_from_file()
     try:
         user_id = session['user_id']
         conn = sqlite3.connect(DB_PATH)
@@ -1906,6 +1948,7 @@ def api_stream(song_id):
 @login_required
 def api_download(song_id):
     """Provide the FLAC file as a downloadable attachment."""
+    local_songs = load_local_songs_from_file()
     user_id = session['user_id']
     
     if song_id.startswith("local-"):
@@ -2157,6 +2200,7 @@ def stream_file(song_id):
 @login_required
 def api_stream_local(song_id):
     """Serve a local file with range requests."""
+    local_songs = load_local_songs_from_file()
     meta = local_songs.get(song_id)
     if not meta:
         return jsonify({"error": "Local file not found"}), 404
