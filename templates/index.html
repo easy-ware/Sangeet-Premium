@@ -1940,24 +1940,7 @@ function setupInsights() {
   });
 }
 
-// 3. Fix AudioWorklet loading with better error handling
-async function setupAudioWorklet(audioContext) {
-  if (!audioContext || !audioContext.audioWorklet) {
-    console.warn('AudioWorklet not supported');
-    return;
-  }
 
-  try {
-    await audioContext.audioWorklet.addModule('/audioworklet/qualityProcessor.js');
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      console.warn('AudioWorklet loading aborted - this is normal if page is unloading');
-    } else {
-      console.warn('AudioWorklet setup failed:', err);
-    }
-    // Continue without AudioWorklet
-  }
-}
 
 // 4. Update initialization function
 async function init() {
@@ -2606,12 +2589,6 @@ window.onunhandledrejection = function(event) {
         event.preventDefault();
     }
 };
-try {
-    audioContext.audioWorklet.addModule('/audioworklet/qualityProcessor.js')
-        .catch(err => console.error('AudioWorklet setup failed:', err));
-} catch (err) {
-    console.error("pass01-e01");
-}
 
   </script>
   <script>
