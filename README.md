@@ -74,12 +74,16 @@ python run_server.py
 # or
 python3 run_server.py
 ```
+# For Sync Run (auto restart server or load aggain if down)
+```
+python3 starter.py
+```
 # If got issues then simply
 ```
 pip install -r requirements/req.txt
 python sangeet_server.py
 # or
-python3 sangeet_server.py
+python3 sangeet_server.py 
 ```
 ## Warn
 ```
