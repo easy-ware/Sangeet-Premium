@@ -357,7 +357,10 @@ def api_download2(song_id):
         logger.error(f"Download route error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
+@bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint that returns a success message"""
+    return jsonify({"status": "healthy", "message": "Server is running"}), 200
 
 @bp.route('/api/artist-info/<artist_name>')
 @login_required
