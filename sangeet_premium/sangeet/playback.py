@@ -1888,11 +1888,12 @@ def internal_error(e):
 
 
 @bp.route("/api/stream/<song_id>")
-@login_required
+# @login_required
 def api_stream(song_id):
     """Obtain a streaming URL for a given song_id (local or YouTube)."""
     user_id = session['user_id']
-    util.record_song(song_id, user_id)
+    if not user_id == None:
+      util.record_song(song_id, user_id)
 
     if song_id.startswith("local-"):
         return jsonify({
@@ -2113,7 +2114,7 @@ def api_clear_downloads():
 
 
 @bp.route("/api/stream-file/<song_id>")
-@login_required
+# @login_required
 def stream_file(song_id):
     """Serve the FLAC file with range requests for seeking."""
     flac_path = os.path.join(os.getenv("music_path"), f"{song_id}.flac")
@@ -2162,7 +2163,7 @@ def stream_file(song_id):
 
 
 @bp.route("/api/stream-local/<song_id>")
-@login_required
+# @login_required
 def api_stream_local(song_id):
     """Serve a local file with range requests."""
     local_songs = load_local_songs_from_file()
