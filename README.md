@@ -22,7 +22,7 @@ Sangeet Premium solves these issues by providing:
 
 ## 🚀 Quick Start Guide
 
-
+`python3.12` or higer..
 
 ### 1. Installation Steps
 ```bash
