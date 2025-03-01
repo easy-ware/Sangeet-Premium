@@ -74,7 +74,7 @@ python run_server.py
 # or
 python3 run_server.py
 ```
-# For Sync Run (auto restart server or load aggain if down)
+# For Sync Run (auto restart server or load again if down)
 ```
 python3 starter.py
 ```
