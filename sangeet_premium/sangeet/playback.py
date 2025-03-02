@@ -2211,17 +2211,42 @@ def api_stream_local(song_id):
         logger.error(f"stream_local error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
 @bp.route("/api/lyrics/<song_id>")
-@login_required
 def api_lyrics(song_id):
     """Return YTMusic lyrics array or [] for local/no lyrics."""
+    
+    # Handle local songs
     if song_id.startswith("local-"):
-        return jsonify([])
-
-    if song_id in lyrics_cache:
-        return jsonify(lyrics_cache[song_id])
-
+        try:
+            # Load the locals.json file
+            with open(os.path.join(os.getcwd() , "locals" , "local.json"), 'r') as f:
+                locals_data = json.load(f)
+            
+            # Get the song data for this local ID
+            song_data = locals_data.get(song_id)
+            if not song_data or "path" not in song_data:
+                logger.info(f"No path found for local song: {song_id}")
+                return jsonify([])
+            
+            # Extract video ID from the filename
+            path = song_data["path"]
+            filename = path.split("/")[-1]
+            video_id = filename.split(".")[0]  # Remove .flac extension
+            
+            # Use the extracted video ID instead of local-id
+            song_id = video_id
+            logger.info(f"Using video ID {video_id} from local song")
+        except Exception as e:
+            logger.error(f"Error extracting video ID from local song: {e}")
+            return jsonify([])
+    
+    # Check if lyrics exist in SQLite cache
+    cached_lyrics = get_cached_lyrics(song_id)
+    if cached_lyrics:
+        logger.info(f"Returning cached lyrics for {song_id}")
+        return jsonify(cached_lyrics)
+    
+    # If not in cache, fetch from YTMusic
     try:
         watch_pl = ytmusic.get_watch_playlist(song_id)
         if not watch_pl or "lyrics" not in watch_pl:
@@ -2230,20 +2255,20 @@ def api_lyrics(song_id):
                 return jsonify([])
         else:
             lbid = watch_pl["lyrics"]
-
+        
         data = ytmusic.get_lyrics(lbid)
         if data and "lyrics" in data:
             lines = data["lyrics"].split("\n")
             lines.append("\n Sangeet Premium")
-            lyrics_cache[song_id] = lines
+            
+            # Save to SQLite cache
+            cache_lyrics(song_id, lines)
+            
             return jsonify(lines)
         return jsonify([])
     except Exception as e:
         logger.error(f"api_lyrics error: {e}")
         return jsonify([])
-
-
-
 @bp.route("/api/downloads")
 @login_required
 def api_downloads():
