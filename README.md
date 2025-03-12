@@ -27,7 +27,7 @@ Sangeet Premium solves these issues by providing:
 ### 1. Installation Steps
 ```bash
 # Clone the repository
-git clone https://github.com/easy-ware/Sangeet-Premium.git
+git clone https://github.com/easy-ware/Sangeet-Premium-V1.0.0.git
 cd Sangeet-Premium
 ```
 ### 2. Setup Environment
